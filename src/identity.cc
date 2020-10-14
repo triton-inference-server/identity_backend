@@ -182,12 +182,15 @@ ModelState::CreationDelay()
   if (model_config_.Find("parameters", &parameters)) {
     common::TritonJson::Value creation_delay_sec;
     if (parameters.Find("creation_delay_sec", &creation_delay_sec)) {
-        std::string creation_delay_sec_str;
-        RETURN_IF_ERROR(creation_delay_sec.MemberAsString("string_value", &creation_delay_sec_str));
-        LOG_MESSAGE(
-      TRITONSERVER_LOG_INFO,
-      (std::string("Creation delay is set to : ") + creation_delay_sec_str).c_str());
-        std::this_thread::sleep_for(std::chrono::seconds(std::stoi(creation_delay_sec_str)));
+      std::string creation_delay_sec_str;
+      RETURN_IF_ERROR(creation_delay_sec.MemberAsString(
+          "string_value", &creation_delay_sec_str));
+      LOG_MESSAGE(
+          TRITONSERVER_LOG_INFO,
+          (std::string("Creation delay is set to : ") + creation_delay_sec_str)
+              .c_str());
+      std::this_thread::sleep_for(
+          std::chrono::seconds(std::stoi(creation_delay_sec_str)));
     }
   }
   return nullptr;  // success
@@ -931,4 +934,4 @@ TRITONBACKEND_ModelInstanceExecute(
 
 }  // extern "C"
 
-}}} // namespace triton::backend::identity
+}}}  // namespace triton::backend::identity
