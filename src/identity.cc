@@ -1,4 +1,4 @@
-// Copyright (c) 2020, NVIDIA CORPORATION. All rights reserved.
+// Copyright (c) 2020-2021, NVIDIA CORPORATION. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -26,6 +26,7 @@
 
 #include <memory>
 #include <thread>
+
 #include "triton/backend/backend_common.h"
 
 namespace triton { namespace backend { namespace identity {
@@ -673,41 +674,34 @@ TRITONBACKEND_ModelInstanceExecute(
          ", requested_output_count = " + std::to_string(requested_output_count))
             .c_str());
 
-    for (uint32_t io_index = 0; io_index < input_count; io_index++) {
-      const char* input_name;
+    // Collect all requested outputs
+    std::vector<const char*> requested_output_names;
+    for (uint32_t io_index = 0; io_index < requested_output_count; io_index++) {
+      const char* output_name;
       GUARDED_RESPOND_IF_ERROR(
           responses, r,
-          TRITONBACKEND_RequestInputName(request, io_index, &input_name));
+          TRITONBACKEND_RequestOutputName(request, io_index, &output_name));
+      requested_output_names.push_back(output_name);
+    }
 
+    for (uint32_t io_index = 0; io_index < input_count; io_index++) {
       TRITONBACKEND_Input* input = nullptr;
       GUARDED_RESPOND_IF_ERROR(
           responses, r,
-          TRITONBACKEND_RequestInput(request, input_name, &input));
+          TRITONBACKEND_RequestInputByIndex(request, io_index, &input));
 
-      // We also validated that the model configuration specifies only a
-      // single output, but the request is not required to request any
-      // output at all so we only produce an output if requested.
-      const char* requested_output_name = nullptr;
-      if (requested_output_count > 0) {
-        GUARDED_RESPOND_IF_ERROR(
-            responses, r,
-            TRITONBACKEND_RequestOutputName(
-                request, io_index, &requested_output_name));
-      }
-
-      // If an error response was sent while getting the input or
-      // requested output name then display an error message and move on
-      // to next request.
+      // If an error response was sent while getting the input then display an
+      // error message and move on to next request.
       if (responses[r] == nullptr) {
         LOG_MESSAGE(
             TRITONSERVER_LOG_ERROR,
             (std::string("request ") + std::to_string(r) +
-             ": failed to read input or requested output name, error response "
-             "sent")
+             ": failed to read input, error response sent")
                 .c_str());
         continue;
       }
 
+      const char* input_name;
       TRITONSERVER_DataType input_datatype;
       const int64_t* input_shape;
       uint32_t input_dims_count;
@@ -716,7 +710,7 @@ TRITONBACKEND_ModelInstanceExecute(
       GUARDED_RESPOND_IF_ERROR(
           responses, r,
           TRITONBACKEND_InputProperties(
-              input, nullptr /* input_name */, &input_datatype, &input_shape,
+              input, &input_name, &input_datatype, &input_shape,
               &input_dims_count, &input_byte_size, &input_buffer_count));
       if (responses[r] == nullptr) {
         LOG_MESSAGE(
@@ -735,9 +729,28 @@ TRITONBACKEND_ModelInstanceExecute(
            ", byte_size = " + std::to_string(input_byte_size) +
            ", buffer_count = " + std::to_string(input_buffer_count))
               .c_str());
-      LOG_MESSAGE(
-          TRITONSERVER_LOG_INFO,
-          (std::string("\trequested_output ") + requested_output_name).c_str());
+
+      // We validated that the model configuration specifies N inputs,
+      // but the request is not required to request any output at all
+      // so we only produce an output if requested.
+      std::string output_name = "OUTPUT" + std::string(input_name, 5, -1);
+      bool is_requested = false;
+      const char* requested_output_name = nullptr;
+      for (uint32_t io_index = 0; io_index < requested_output_count;
+           io_index++) {
+        if (output_name.compare(requested_output_names[io_index]) == 0) {
+          is_requested = true;
+          break;
+        }
+      }
+
+      if (is_requested) {
+        requested_output_name = output_name.c_str();
+        LOG_MESSAGE(
+            TRITONSERVER_LOG_INFO,
+            (std::string("\trequested_output ") + requested_output_name)
+                .c_str());
+      }
 
       // For statistics we need to collect the total batch size of all
       // the requests. If the model doesn't support batching then each
@@ -751,7 +764,7 @@ TRITONBACKEND_ModelInstanceExecute(
       }
 
       // We only need to produce an output if it was requested.
-      if (requested_output_count > 0) {
+      if (is_requested) {
         // This backend simply copies the input tensor to the output
         // tensor. The input tensor contents are available in one or
         // more contiguous buffers. To do the copy we:
