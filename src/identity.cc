@@ -273,6 +273,10 @@ class ModelInstanceState {
   // Get the state of the model that corresponds to this instance.
   ModelState* StateForModel() const { return model_state_; }
 
+#ifdef TRITON_ENABLE_GPU
+  cudaStream_t stream_;
+#endif  // TRITON_ENABLE_GPU
+
  private:
   ModelInstanceState(
       ModelState* model_state,
@@ -316,6 +320,12 @@ ModelInstanceState::ModelInstanceState(
     : model_state_(model_state), triton_model_instance_(triton_model_instance),
       name_(name), kind_(kind), device_id_(device_id)
 {
+#ifdef TRITON_ENABLE_GPU
+  auto cuerr = cudaStreamCreate(&stream_);
+  if (cuerr != cudaSuccess) {
+    stream_ = nullptr;
+  }
+#endif  // TRITON_ENABLE_GPU
 }
 
 /////////////
@@ -805,8 +815,8 @@ TRITONBACKEND_ModelInstanceExecute(
             TRITONBACKEND_OutputBuffer(
                 output, &output_buffer, input_byte_size, &output_memory_type,
                 &output_memory_type_id));
-        if ((responses[r] == nullptr) ||
-            (output_memory_type == TRITONSERVER_MEMORY_GPU)) {
+#ifndef TRITON_ENABLE_GPU
+        if (output_memory_type == TRITONSERVER_MEMORY_GPU) {
           GUARDED_RESPOND_IF_ERROR(
               responses, r,
               TRITONSERVER_ErrorNew(
@@ -815,8 +825,23 @@ TRITONBACKEND_ModelInstanceExecute(
           LOG_MESSAGE(
               TRITONSERVER_LOG_ERROR,
               (std::string("request ") + std::to_string(r) +
-               ": failed to create output buffer in CPU memory, error response "
-               "sent")
+               ": failed to create output buffer in CPU memory, error "
+               "response sent")
+                  .c_str());
+          continue;
+        }
+#endif  // TRITON_ENABLE_GPU
+        if (responses[r] == nullptr) {
+          GUARDED_RESPOND_IF_ERROR(
+              responses, r,
+              TRITONSERVER_ErrorNew(
+                  TRITONSERVER_ERROR_UNSUPPORTED,
+                  "failed to create output buffer"));
+          LOG_MESSAGE(
+              TRITONSERVER_LOG_ERROR,
+              (std::string("request ") + std::to_string(r) +
+               ": failed to create output buffer, error "
+               "response sent")
                   .c_str());
           continue;
         }
@@ -834,29 +859,112 @@ TRITONBACKEND_ModelInstanceExecute(
               TRITONBACKEND_InputBuffer(
                   input, b, &input_buffer, &buffer_byte_size,
                   &input_memory_type, &input_memory_type_id));
-          if ((responses[r] == nullptr) ||
-              (input_memory_type == TRITONSERVER_MEMORY_GPU)) {
+#ifndef TRITON_ENABLE_GPU
+          if (input_memory_type == TRITONSERVER_MEMORY_GPU) {
             GUARDED_RESPOND_IF_ERROR(
                 responses, r,
                 TRITONSERVER_ErrorNew(
                     TRITONSERVER_ERROR_UNSUPPORTED,
                     "failed to get input buffer in CPU memory"));
+            LOG_MESSAGE(
+                TRITONSERVER_LOG_ERROR,
+                (std::string("request ") + std::to_string(r) +
+                 ": failed to get input buffer in CPU memory, error "
+                 "response sent")
+                    .c_str());
+            continue;
+          }
+#endif  // TRITON_ENABLE_GPU
+          if (responses[r] == nullptr) {
+            GUARDED_RESPOND_IF_ERROR(
+                responses, r,
+                TRITONSERVER_ErrorNew(
+                    TRITONSERVER_ERROR_UNSUPPORTED,
+                    "failed to get input buffer"));
+            LOG_MESSAGE(
+                TRITONSERVER_LOG_ERROR,
+                (std::string("request ") + std::to_string(r) +
+                 ": failed to get input buffer, error "
+                 "response sent")
+                    .c_str());
+            continue;
           }
 
-          memcpy(
-              reinterpret_cast<char*>(output_buffer) + output_buffer_offset,
-              input_buffer, buffer_byte_size);
-          output_buffer_offset += buffer_byte_size;
-        }
+#ifdef TRITON_ENABLE_GPU
+          auto copy_type = cudaMemcpyHostToHost;
+          switch (input_memory_type) {
+            case TRITONSERVER_MEMORY_GPU: {
+              switch (output_memory_type) {
+                case TRITONSERVER_MEMORY_GPU:
+                  copy_type = cudaMemcpyDeviceToDevice;
+                  break;
+                default:
+                  copy_type = cudaMemcpyDeviceToHost;
+                  break;
+              }
+              break;
+            }
+            default: {
+              switch (output_memory_type) {
+                case TRITONSERVER_MEMORY_GPU:
+                  copy_type = cudaMemcpyHostToDevice;
+                  break;
+                default:
+                  // default 'copy_type' value: cudaMemcpyHostToHost
+                  break;
+              }
+              break;
+            }
+          }
 
-        if (responses[r] == nullptr) {
-          LOG_MESSAGE(
-              TRITONSERVER_LOG_ERROR,
-              (std::string("request ") + std::to_string(r) +
-               ": failed to get input buffer in CPU memory, error response "
-               "sent")
-                  .c_str());
-          continue;
+          if (copy_type != cudaMemcpyHostToHost) {
+            cudaError_t err;
+            if ((input_memory_type_id != output_memory_type_id) &&
+                (copy_type == cudaMemcpyDeviceToDevice)) {
+              err = cudaMemcpyPeerAsync(
+                  reinterpret_cast<char*>(output_buffer) + output_buffer_offset,
+                  output_memory_type_id, input_buffer, input_memory_type_id,
+                  buffer_byte_size, instance_state->stream_);
+            } else {
+              err = cudaMemcpyAsync(
+                  reinterpret_cast<char*>(output_buffer) + output_buffer_offset,
+                  input_buffer, buffer_byte_size, copy_type,
+                  instance_state->stream_);
+            }
+            if (err != cudaSuccess) {
+              GUARDED_RESPOND_IF_ERROR(
+                  responses, r,
+                  TRITONSERVER_ErrorNew(
+                      TRITONSERVER_ERROR_UNSUPPORTED,
+                      (std::string(
+                           "failed to get copy buffer to/from memory: ") +
+                       cudaGetErrorString(err))
+                          .c_str()));
+            }
+          } else {
+#endif  // TRITON_ENABLE_GPU
+            memcpy(
+                reinterpret_cast<char*>(output_buffer) + output_buffer_offset,
+                input_buffer, buffer_byte_size);
+#ifdef TRITON_ENABLE_GPU
+          }
+#endif  // TRITON_ENABLE_GPU
+          output_buffer_offset += buffer_byte_size;
+
+          if (responses[r] == nullptr) {
+            GUARDED_RESPOND_IF_ERROR(
+                responses, r,
+                TRITONSERVER_ErrorNew(
+                    TRITONSERVER_ERROR_UNSUPPORTED,
+                    "failed to get copy buffer"));
+            LOG_MESSAGE(
+                TRITONSERVER_LOG_ERROR,
+                (std::string("request ") + std::to_string(r) +
+                 ": failed to get copy buffer, error response "
+                 "sent")
+                    .c_str());
+            continue;
+          }
         }
       }
     }
