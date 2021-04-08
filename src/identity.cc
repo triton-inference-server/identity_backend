@@ -231,10 +231,20 @@ ModelState::ValidateModelConfig()
         std::string("expected input and output datatype to match, got ") +
             input_dtype + " and " + output_dtype);
 
-    // Input and output must have same shape
+    // Input and output must have same shape or reshaped shape
     std::vector<int64_t> input_shape, output_shape;
-    RETURN_IF_ERROR(backend::ParseShape(input, "dims", &input_shape));
-    RETURN_IF_ERROR(backend::ParseShape(output, "dims", &output_shape));
+    triton::common::TritonJson::Value reshape;
+    if (input.Find("reshape", &reshape)) {
+      RETURN_IF_ERROR(backend::ParseShape(reshape, "shape", &input_shape));
+    } else {
+      RETURN_IF_ERROR(backend::ParseShape(input, "dims", &input_shape));
+    }
+
+    if (output.Find("reshape", &reshape)) {
+      RETURN_IF_ERROR(backend::ParseShape(reshape, "shape", &output_shape));
+    } else {
+      RETURN_IF_ERROR(backend::ParseShape(output, "dims", &output_shape));
+    }
 
     RETURN_ERROR_IF_FALSE(
         input_shape == output_shape, TRITONSERVER_ERROR_INVALID_ARG,
