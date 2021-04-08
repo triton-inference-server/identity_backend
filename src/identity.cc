@@ -37,7 +37,7 @@ namespace triton { namespace backend { namespace identity {
 //
 // This backend supports any model that has same number of inputs and outputs.
 // The input and output must follow a naming convention i.e INPUT<index> and
-// OUTPUT<index> where 'index' is the input/output number. The datatype and
+// OUTPUT<index> where 'index' is the input/output index. The datatype and
 // shape/reshaped shape must match. The backend simply responds with the output
 // tensors equal to the corresponding input tensors.
 //
@@ -215,10 +215,38 @@ ModelState::ValidateModelConfig()
       inputs.ArraySize() == outputs.ArraySize(), TRITONSERVER_ERROR_INVALID_ARG,
       std::string("model configuration must have equal input/output pairs"));
 
+  std::set<std::string> input_indices;
+  std::set<std::string> output_indices;
   for (size_t io_index = 0; io_index < inputs.ArraySize(); io_index++) {
     common::TritonJson::Value input, output;
     RETURN_IF_ERROR(inputs.IndexAsObject(io_index, &input));
     RETURN_IF_ERROR(outputs.IndexAsObject(io_index, &output));
+
+    // Input and output names must follow INPUT/OUTPUT<index> pattern
+    const char* input_name;
+    size_t input_name_len;
+    RETURN_IF_ERROR(input.MemberAsString("name", &input_name, &input_name_len));
+
+    const char* output_name;
+    size_t output_name_len;
+    RETURN_IF_ERROR(
+        output.MemberAsString("name", &output_name, &output_name_len));
+
+    std::string input_name_str = std::string(input_name);
+    RETURN_ERROR_IF_FALSE(
+        input_name_str.rfind("INPUT", 0) == 0, TRITONSERVER_ERROR_INVALID_ARG,
+        std::string(
+            "expected input name to follow INPUT<index> pattern, got '") +
+            input_name + "'");
+    input_indices.insert(input_name_str.substr(strlen("INPUT")));
+
+    std::string output_name_str = std::string(output_name);
+    RETURN_ERROR_IF_FALSE(
+        output_name_str.rfind("OUTPUT", 0) == 0, TRITONSERVER_ERROR_INVALID_ARG,
+        std::string(
+            "expected output name to follow OUTPUT<index> pattern, got '") +
+            output_name + "'");
+    output_indices.insert(output_name_str.substr(strlen("OUTPUT")));
 
     // Input and output must have same datatype
     std::string input_dtype, output_dtype;
@@ -251,6 +279,10 @@ ModelState::ValidateModelConfig()
             backend::ShapeToString(input_shape) + " and " +
             backend::ShapeToString(output_shape));
   }
+
+  RETURN_ERROR_IF_FALSE(
+      input_indices == output_indices, TRITONSERVER_ERROR_INVALID_ARG,
+      std::string("expected input and output indices to match"));
 
   return nullptr;  // success
 }
@@ -700,11 +732,6 @@ TRITONBACKEND_ModelInstanceExecute(
       GUARDED_RESPOND_IF_ERROR(
           responses, r,
           TRITONBACKEND_RequestInputName(request, io_index, &input_name));
-      LOG_MESSAGE(
-          TRITONSERVER_LOG_ERROR,
-          (std::string("input_name (") + std::to_string(io_index) + "): '" +
-           input_name + "'")
-              .c_str());
       input_names.insert(input_name);
     }
 
