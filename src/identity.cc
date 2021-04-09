@@ -28,7 +28,15 @@
 #include <thread>
 #include "triton/backend/backend_common.h"
 
+#ifdef TRITON_ENABLE_GPU
+#include <cuda_runtime_api.h>
+#endif  // TRITON_ENABLE_GPU
+
 namespace triton { namespace backend { namespace identity {
+
+#ifndef TRITON_ENABLE_GPU
+using cudaStream_t = void*;
+#endif  // !TRITON_ENABLE_GPU
 
 //
 // Simple backend that demonstrates the TRITONBACKEND API for a
@@ -299,6 +307,7 @@ class ModelInstanceState {
       ModelState* model_state,
       TRITONBACKEND_ModelInstance* triton_model_instance,
       ModelInstanceState** state);
+  ~ModelInstanceState();
 
   // Get the handle to the TRITONBACKEND model instance.
   TRITONBACKEND_ModelInstance* TritonModelInstance()
@@ -314,21 +323,24 @@ class ModelInstanceState {
   // Get the state of the model that corresponds to this instance.
   ModelState* StateForModel() const { return model_state_; }
 
-#ifdef TRITON_ENABLE_GPU
-  cudaStream_t stream_;
-#endif  // TRITON_ENABLE_GPU
+  // Returns the stream associated with this instance that can be used
+  // for GPU<->CPU memory transfers. Returns nullptr if GPU support is
+  // disabled or if this instance is not executing on a GPU.
+  cudaStream_t CudaStream() { return stream_; }
 
  private:
   ModelInstanceState(
       ModelState* model_state,
       TRITONBACKEND_ModelInstance* triton_model_instance, const char* name,
-      const TRITONSERVER_InstanceGroupKind kind, const int32_t device_id);
+      const TRITONSERVER_InstanceGroupKind kind, const int32_t device_id,
+      cudaStream_t stream);
 
   ModelState* model_state_;
   TRITONBACKEND_ModelInstance* triton_model_instance_;
   const std::string name_;
   const TRITONSERVER_InstanceGroupKind kind_;
   const int32_t device_id_;
+  cudaStream_t stream_;
 };
 
 TRITONSERVER_Error*
@@ -348,22 +360,39 @@ ModelInstanceState::Create(
   RETURN_IF_ERROR(
       TRITONBACKEND_ModelInstanceDeviceId(triton_model_instance, &instance_id));
 
+  cudaStream_t stream = nullptr;
+  if (instance_kind == TRITONSERVER_INSTANCEGROUPKIND_GPU) {
+    RETURN_IF_ERROR(
+        CreateCudaStream(instance_id, 0 /* cuda_stream_priority */, &stream));
+  }
+
   *state = new ModelInstanceState(
       model_state, triton_model_instance, instance_name, instance_kind,
-      instance_id);
+      instance_id, stream);
   return nullptr;  // success
 }
 
 ModelInstanceState::ModelInstanceState(
     ModelState* model_state, TRITONBACKEND_ModelInstance* triton_model_instance,
     const char* name, const TRITONSERVER_InstanceGroupKind kind,
-    const int32_t device_id)
+    const int32_t device_id, cudaStream_t stream)
     : model_state_(model_state), triton_model_instance_(triton_model_instance),
-      name_(name), kind_(kind), device_id_(device_id)
+      name_(name), kind_(kind), device_id_(device_id), stream_(stream)
+{
+}
+
+ModelInstanceState::~ModelInstanceState()
 {
 #ifdef TRITON_ENABLE_GPU
-  auto cuerr = cudaStreamCreate(&stream_);
-  if (cuerr != cudaSuccess) {
+  if (stream_ != nullptr) {
+    cudaError_t err = cudaStreamDestroy(stream_);
+    if (err != cudaSuccess) {
+      LOG_MESSAGE(
+          TRITONSERVER_LOG_ERROR,
+          (std::string("~ModelInstanceState: ") + name_ +
+           " failed to destroy cuda stream: " + cudaGetErrorString(err))
+              .c_str());
+    }
     stream_ = nullptr;
   }
 #endif  // TRITON_ENABLE_GPU
@@ -725,6 +754,10 @@ TRITONBACKEND_ModelInstanceExecute(
          ", requested_output_count = " + std::to_string(requested_output_count))
             .c_str());
 
+#ifdef TRITON_ENABLE_GPU
+    bool cuda_copy = false;
+#endif  // TRITON_ENABLE_GPU
+
     // Collect all input names outputs
     std::set<std::string> input_names;
     for (uint32_t io_index = 0; io_index < input_count; io_index++) {
@@ -981,64 +1014,16 @@ TRITONBACKEND_ModelInstanceExecute(
         }
 
 #ifdef TRITON_ENABLE_GPU
-        auto copy_type = cudaMemcpyHostToHost;
-        switch (input_memory_type) {
-          case TRITONSERVER_MEMORY_GPU: {
-            switch (output_memory_type) {
-              case TRITONSERVER_MEMORY_GPU:
-                copy_type = cudaMemcpyDeviceToDevice;
-                break;
-              default:
-                copy_type = cudaMemcpyDeviceToHost;
-                break;
-            }
-            break;
-          }
-          default: {
-            switch (output_memory_type) {
-              case TRITONSERVER_MEMORY_GPU:
-                copy_type = cudaMemcpyHostToDevice;
-                break;
-              default:
-                // default 'copy_type' value: cudaMemcpyHostToHost
-                break;
-            }
-            break;
-          }
-        }
-
-        if (copy_type != cudaMemcpyHostToHost) {
-          cudaError_t err;
-          if ((input_memory_type_id != output_memory_type_id) &&
-              (copy_type == cudaMemcpyDeviceToDevice)) {
-            err = cudaMemcpyPeerAsync(
+        bool cuda_used = false;
+        GUARDED_RESPOND_IF_ERROR(
+            responses, r,
+            CopyBuffer(
+                input_name, input_memory_type, input_memory_type_id,
+                output_memory_type, output_memory_type_id, buffer_byte_size,
+                input_buffer,
                 reinterpret_cast<char*>(output_buffer) + output_buffer_offset,
-                output_memory_type_id, input_buffer, input_memory_type_id,
-                buffer_byte_size, instance_state->stream_);
-          } else {
-            err = cudaMemcpyAsync(
-                reinterpret_cast<char*>(output_buffer) + output_buffer_offset,
-                input_buffer, buffer_byte_size, copy_type,
-                instance_state->stream_);
-          }
-          if (err != cudaSuccess) {
-            GUARDED_RESPOND_IF_ERROR(
-                responses, r,
-                TRITONSERVER_ErrorNew(
-                    TRITONSERVER_ERROR_UNSUPPORTED,
-                    (std::string("failed to get copy buffer to/from memory: ") +
-                     cudaGetErrorString(err))
-                        .c_str()));
-          }
-        } else {
-#endif  // TRITON_ENABLE_GPU
-          memcpy(
-              reinterpret_cast<char*>(output_buffer) + output_buffer_offset,
-              input_buffer, buffer_byte_size);
-#ifdef TRITON_ENABLE_GPU
-        }
-#endif  // TRITON_ENABLE_GPU
-        output_buffer_offset += buffer_byte_size;
+                instance_state->CudaStream(), &cuda_used));
+        cuda_copy |= cuda_used;
 
         if (responses[r] == nullptr) {
           GUARDED_RESPOND_IF_ERROR(
@@ -1053,8 +1038,20 @@ TRITONBACKEND_ModelInstanceExecute(
                   .c_str());
           continue;
         }
+#else
+        memcpy(
+            reinterpret_cast<char*>(output_buffer) + output_buffer_offset,
+            input_buffer, buffer_byte_size);
+#endif  // TRITON_ENABLE_GPU
+        output_buffer_offset += buffer_byte_size;
       }
     }
+
+#ifdef TRITON_ENABLE_GPU
+    if (cuda_copy) {
+      cudaStreamSynchronize(instance_state->CudaStream());
+    }
+#endif  // TRITON_ENABLE_GPU
 
     // To demonstrate response parameters we attach some here. Most responses do
     // not use parameters but they provide a way for backends to communicate
