@@ -24,6 +24,7 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#include <map>
 #include <memory>
 #include <thread>
 #include "triton/backend/backend_common.h"
@@ -223,8 +224,9 @@ ModelState::ValidateModelConfig()
       inputs.ArraySize() == outputs.ArraySize(), TRITONSERVER_ERROR_INVALID_ARG,
       std::string("model configuration must have equal input/output pairs"));
 
-  std::set<std::string> input_indices;
-  std::set<std::string> output_indices;
+  // Collect input/output names, shapes and datatypes
+  std::map<std::string, std::tuple<std::string, std::vector<int64_t>>>
+      input_infos, output_infos;
   for (size_t io_index = 0; io_index < inputs.ArraySize(); io_index++) {
     common::TritonJson::Value input, output;
     RETURN_IF_ERROR(inputs.IndexAsObject(io_index, &input));
@@ -246,7 +248,6 @@ ModelState::ValidateModelConfig()
         std::string(
             "expected input name to follow INPUT<index> pattern, got '") +
             input_name + "'");
-    input_indices.insert(input_name_str.substr(strlen("INPUT")));
 
     std::string output_name_str = std::string(output_name);
     RETURN_ERROR_IF_FALSE(
@@ -254,17 +255,11 @@ ModelState::ValidateModelConfig()
         std::string(
             "expected output name to follow OUTPUT<index> pattern, got '") +
             output_name + "'");
-    output_indices.insert(output_name_str.substr(strlen("OUTPUT")));
 
     // Input and output must have same datatype
     std::string input_dtype, output_dtype;
     RETURN_IF_ERROR(input.MemberAsString("data_type", &input_dtype));
     RETURN_IF_ERROR(output.MemberAsString("data_type", &output_dtype));
-
-    RETURN_ERROR_IF_FALSE(
-        input_dtype == output_dtype, TRITONSERVER_ERROR_INVALID_ARG,
-        std::string("expected input and output datatype to match, got ") +
-            input_dtype + " and " + output_dtype);
 
     // Input and output must have same shape or reshaped shape
     std::vector<int64_t> input_shape, output_shape;
@@ -281,16 +276,36 @@ ModelState::ValidateModelConfig()
       RETURN_IF_ERROR(backend::ParseShape(output, "dims", &output_shape));
     }
 
-    RETURN_ERROR_IF_FALSE(
-        input_shape == output_shape, TRITONSERVER_ERROR_INVALID_ARG,
-        std::string("expected input and output shape to match, got ") +
-            backend::ShapeToString(input_shape) + " and " +
-            backend::ShapeToString(output_shape));
+    input_infos.insert(std::make_pair(
+        input_name_str.substr(strlen("INPUT")),
+        std::make_tuple(input_dtype, input_shape)));
+    output_infos.insert(std::make_pair(
+        output_name_str.substr(strlen("OUTPUT")),
+        std::make_tuple(output_dtype, output_shape)));
   }
 
-  RETURN_ERROR_IF_FALSE(
-      input_indices == output_indices, TRITONSERVER_ERROR_INVALID_ARG,
-      std::string("expected input and output indices to match"));
+  // Must validate name, shape and datatype with corresponding input
+  for (auto it = output_infos.begin(); it != output_infos.end(); ++it) {
+    std::string output_index = it->first;
+    auto input_it = input_infos.find(output_index);
+
+    RETURN_ERROR_IF_FALSE(
+        input_it != input_infos.end(), TRITONSERVER_ERROR_INVALID_ARG,
+        std::string("expected input and output indices to match"));
+
+    RETURN_ERROR_IF_FALSE(
+        std::get<0>(input_it->second) == std::get<0>(it->second),
+        TRITONSERVER_ERROR_INVALID_ARG,
+        std::string("expected input and output datatype to match, got ") +
+            std::get<0>(input_it->second) + " and " + std::get<0>(it->second));
+
+    RETURN_ERROR_IF_FALSE(
+        std::get<1>(input_it->second) == std::get<1>(it->second),
+        TRITONSERVER_ERROR_INVALID_ARG,
+        std::string("expected input and output shape to match, got ") +
+            backend::ShapeToString(std::get<1>(input_it->second)) + " and " +
+            backend::ShapeToString(std::get<1>(it->second)));
+  }
 
   return nullptr;  // success
 }
