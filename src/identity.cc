@@ -825,6 +825,8 @@ TRITONBACKEND_ModelInstanceExecute(
       }
     }
 
+    uint64_t compute_start_ns = 0;
+    SET_TIMESTAMP(compute_start_ns);
 
     // We validated that the model configuration specifies N inputs, but the
     // request is not required to request any output at all so we only produce
@@ -1061,6 +1063,9 @@ TRITONBACKEND_ModelInstanceExecute(
         output_buffer_offset += buffer_byte_size;
       }
     }
+
+    uint64_t compute_end_ns = 0;
+    SET_TIMESTAMP(compute_end_ns);
 
 #ifdef TRITON_ENABLE_GPU
     if (cuda_copy) {
