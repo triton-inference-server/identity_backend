@@ -86,6 +86,10 @@ class ModelState {
   const std::string& Name() const { return name_; }
   uint64_t Version() const { return version_; }
 
+  // Get execution delay and delay multiplier
+  uint64_t ExecDelay() const { return execute_delay_ms_; }
+  uint64_t Multiplier() const { return delay_multiplier_; }
+
   // Does this model support batching in the first dimension. This
   // function should not be called until after the model is completely
   // loaded.
@@ -109,6 +113,10 @@ class ModelState {
   const std::string name_;
   const uint64_t version_;
   common::TritonJson::Value model_config_;
+
+  // Delay time and multiplier to introduce into execution, in milliseconds.
+  int execute_delay_ms_;
+  int delay_multiplier_;
 
   bool supports_batching_initialized_;
   bool supports_batching_;
@@ -159,6 +167,7 @@ ModelState::ModelState(
     common::TritonJson::Value&& model_config)
     : triton_server_(triton_server), triton_model_(triton_model), name_(name),
       version_(version), model_config_(std::move(model_config)),
+      execute_delay_ms_(0), delay_multiplier_(0),
       supports_batching_initialized_(false), supports_batching_(false)
 {
 }
@@ -305,6 +314,27 @@ ModelState::ValidateModelConfig()
         std::string("expected input and output shape to match, got ") +
             backend::ShapeToString(std::get<1>(input_it->second)) + " and " +
             backend::ShapeToString(std::get<1>(it->second)));
+  }
+
+  triton::common::TritonJson::Value params;
+  if (model_config_.Find("parameters", &params)) {
+    common::TritonJson::Value exec_delay;
+    if (params.Find("execute_delay_ms", &exec_delay)) {
+      uint64_t delay = 0;
+      RETURN_IF_ERROR(exec_delay.AsUInt(&delay));
+      execute_delay_ms_ = delay;
+
+      // Apply delay multiplier based on instance index, this is not taking
+      // multiple devices into consideration, so the behavior is best controlled
+      // in single device case.
+      common::TritonJson::Value delay_multiplier;
+      if (params.Find("instance_wise_delay_multiplier", &delay_multiplier)) {
+        const char* cstr;
+        size_t len = 0;
+        RETURN_IF_ERROR(delay_multiplier.AsString(&cstr, &len));
+        delay_multiplier_ = std::stoi(cstr);
+      }
+    }
   }
 
   return nullptr;  // success
@@ -623,6 +653,7 @@ TRITONBACKEND_ModelInstanceInitialize(TRITONBACKEND_ModelInstance* instance)
   RETURN_IF_ERROR(TRITONBACKEND_ModelInstanceSetState(
       instance, reinterpret_cast<void*>(instance_state)));
 
+#ifndef TRITON_ENABLE_GPU
   // Because this backend just copies IN -> OUT and requires that
   // input and output be in CPU memory, we fail if a GPU instances is
   // requested.
@@ -630,6 +661,7 @@ TRITONBACKEND_ModelInstanceInitialize(TRITONBACKEND_ModelInstance* instance)
       instance_state->Kind() == TRITONSERVER_INSTANCEGROUPKIND_CPU,
       TRITONSERVER_ERROR_INVALID_ARG,
       std::string("'identity' backend only supports CPU instances"));
+#endif  // TRITON_ENABLE_GPU
 
   return nullptr;  // success
 }
@@ -685,6 +717,17 @@ TRITONBACKEND_ModelInstanceExecute(
        " requests")
           .c_str());
 
+  // Delay if requested...
+  if (model_state->ExecDelay() > 0) {
+    int multiplier = 1;
+    if (model_state->Multiplier() > 0) {
+      multiplier *= instance_state->DeviceId();
+      multiplier = std::max(multiplier, 1);
+    }
+    std::this_thread::sleep_for(
+        std::chrono::milliseconds(model_state->ExecDelay() * multiplier));
+  }
+
   bool supports_batching = false;
   RETURN_IF_ERROR(model_state->SupportsFirstDimBatching(&supports_batching));
 
@@ -714,7 +757,9 @@ TRITONBACKEND_ModelInstanceExecute(
   // just show the entire execute time as being the compute time as
   // well.
   uint64_t min_exec_start_ns = std::numeric_limits<uint64_t>::max();
+  uint64_t min_compute_start_ns = min_exec_start_ns;
   uint64_t max_exec_end_ns = 0;
+  uint64_t max_compute_end_ns = 0;
   uint64_t total_batch_size = 0;
 
   // After this point we take ownership of 'requests', which means
@@ -827,6 +872,7 @@ TRITONBACKEND_ModelInstanceExecute(
 
     uint64_t compute_start_ns = 0;
     SET_TIMESTAMP(compute_start_ns);
+    min_compute_start_ns = std::min(min_compute_start_ns, compute_start_ns);
 
     // We validated that the model configuration specifies N inputs, but the
     // request is not required to request any output at all so we only produce
@@ -1066,6 +1112,7 @@ TRITONBACKEND_ModelInstanceExecute(
 
     uint64_t compute_end_ns = 0;
     SET_TIMESTAMP(compute_end_ns);
+    max_compute_end_ns = std::max(max_compute_end_ns, compute_end_ns);
 
 #ifdef TRITON_ENABLE_GPU
     if (cuda_copy) {
@@ -1107,7 +1154,7 @@ TRITONBACKEND_ModelInstanceExecute(
     LOG_IF_ERROR(
         TRITONBACKEND_ModelInstanceReportStatistics(
             instance_state->TritonModelInstance(), request, true /* success */,
-            exec_start_ns, exec_start_ns, exec_end_ns, exec_end_ns),
+            exec_start_ns, compute_start_ns, compute_end_ns, exec_end_ns),
         "failed reporting request statistics");
   }
 
@@ -1122,7 +1169,7 @@ TRITONBACKEND_ModelInstanceExecute(
   LOG_IF_ERROR(
       TRITONBACKEND_ModelInstanceReportBatchStatistics(
           instance_state->TritonModelInstance(), total_batch_size,
-          min_exec_start_ns, min_exec_start_ns, max_exec_end_ns,
+          min_exec_start_ns, min_compute_start_ns, max_compute_end_ns,
           max_exec_end_ns),
       "failed reporting batch request statistics");
 
