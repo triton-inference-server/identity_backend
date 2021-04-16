@@ -815,9 +815,7 @@ TRITONBACKEND_ModelInstanceExecute(
          ", requested_output_count = " + std::to_string(requested_output_count))
             .c_str());
 
-#ifdef TRITON_ENABLE_GPU
     bool cuda_copy = false;
-#endif  // TRITON_ENABLE_GPU
 
     // Collect all input names outputs
     std::set<std::string> input_names;
@@ -1060,6 +1058,7 @@ TRITONBACKEND_ModelInstanceExecute(
           continue;
         }
 #endif  // TRITON_ENABLE_GPU
+
         if (responses[r] == nullptr) {
           GUARDED_RESPOND_IF_ERROR(
               responses, r,
@@ -1075,7 +1074,6 @@ TRITONBACKEND_ModelInstanceExecute(
           continue;
         }
 
-#ifdef TRITON_ENABLE_GPU
         bool cuda_used = false;
         GUARDED_RESPOND_IF_ERROR(
             responses, r,
@@ -1100,11 +1098,6 @@ TRITONBACKEND_ModelInstanceExecute(
                   .c_str());
           continue;
         }
-#else
-        memcpy(
-            reinterpret_cast<char*>(output_buffer) + output_buffer_offset,
-            input_buffer, buffer_byte_size);
-#endif  // TRITON_ENABLE_GPU
         output_buffer_offset += buffer_byte_size;
       }
     }
