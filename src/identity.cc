@@ -90,6 +90,9 @@ class ModelState {
   uint64_t ExecDelay() const { return execute_delay_ms_; }
   uint64_t Multiplier() const { return delay_multiplier_; }
 
+  // Stores the instance count
+  size_t instance_count_;
+
   // Does this model support batching in the first dimension. This
   // function should not be called until after the model is completely
   // loaded.
@@ -165,10 +168,11 @@ ModelState::ModelState(
     TRITONSERVER_Server* triton_server, TRITONBACKEND_Model* triton_model,
     const char* name, const uint64_t version,
     common::TritonJson::Value&& model_config)
-    : triton_server_(triton_server), triton_model_(triton_model), name_(name),
-      version_(version), model_config_(std::move(model_config)),
-      execute_delay_ms_(0), delay_multiplier_(0),
-      supports_batching_initialized_(false), supports_batching_(false)
+    : instance_count_(0), triton_server_(triton_server),
+      triton_model_(triton_model), name_(name), version_(version),
+      model_config_(std::move(model_config)), execute_delay_ms_(0),
+      delay_multiplier_(0), supports_batching_initialized_(false),
+      supports_batching_(false)
 {
 }
 
@@ -361,10 +365,11 @@ class ModelInstanceState {
     return triton_model_instance_;
   }
 
-  // Get the name, kind and device ID of the instance.
+  // Get the name, kind, device ID and instance ID of the instance.
   const std::string& Name() const { return name_; }
   TRITONSERVER_InstanceGroupKind Kind() const { return kind_; }
   int32_t DeviceId() const { return device_id_; }
+  size_t InstanceId() const { return instance_id_; }
 
   // Get the state of the model that corresponds to this instance.
   ModelState* StateForModel() const { return model_state_; }
@@ -379,13 +384,14 @@ class ModelInstanceState {
       ModelState* model_state,
       TRITONBACKEND_ModelInstance* triton_model_instance, const char* name,
       const TRITONSERVER_InstanceGroupKind kind, const int32_t device_id,
-      cudaStream_t stream);
+      const size_t instance_id, cudaStream_t stream);
 
   ModelState* model_state_;
   TRITONBACKEND_ModelInstance* triton_model_instance_;
   const std::string name_;
   const TRITONSERVER_InstanceGroupKind kind_;
   const int32_t device_id_;
+  const size_t instance_id_;
   cudaStream_t stream_;
 };
 
@@ -402,28 +408,30 @@ ModelInstanceState::Create(
   RETURN_IF_ERROR(
       TRITONBACKEND_ModelInstanceKind(triton_model_instance, &instance_kind));
 
-  int32_t instance_id;
+  int32_t device_id;
   RETURN_IF_ERROR(
-      TRITONBACKEND_ModelInstanceDeviceId(triton_model_instance, &instance_id));
+      TRITONBACKEND_ModelInstanceDeviceId(triton_model_instance, &device_id));
 
   cudaStream_t stream = nullptr;
   if (instance_kind == TRITONSERVER_INSTANCEGROUPKIND_GPU) {
     RETURN_IF_ERROR(
-        CreateCudaStream(instance_id, 0 /* cuda_stream_priority */, &stream));
+        CreateCudaStream(device_id, 0 /* cuda_stream_priority */, &stream));
   }
 
   *state = new ModelInstanceState(
       model_state, triton_model_instance, instance_name, instance_kind,
-      instance_id, stream);
+      device_id, model_state->instance_count_, stream);
+  model_state->instance_count_++;
   return nullptr;  // success
 }
 
 ModelInstanceState::ModelInstanceState(
     ModelState* model_state, TRITONBACKEND_ModelInstance* triton_model_instance,
     const char* name, const TRITONSERVER_InstanceGroupKind kind,
-    const int32_t device_id, cudaStream_t stream)
+    const int32_t device_id, const size_t instance_id, cudaStream_t stream)
     : model_state_(model_state), triton_model_instance_(triton_model_instance),
-      name_(name), kind_(kind), device_id_(device_id), stream_(stream)
+      name_(name), kind_(kind), device_id_(device_id),
+      instance_id_(instance_id), stream_(stream)
 {
 }
 
@@ -722,7 +730,7 @@ TRITONBACKEND_ModelInstanceExecute(
   if (model_state->ExecDelay() > 0) {
     int multiplier = 1;
     if (model_state->Multiplier() > 0) {
-      multiplier *= instance_state->DeviceId();
+      multiplier *= instance_state->InstanceId();
       multiplier = std::max(multiplier, 1);
     }
     std::this_thread::sleep_for(
