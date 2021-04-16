@@ -864,7 +864,7 @@ TRITONBACKEND_ModelInstanceExecute(
         continue;
       }
 
-      if ((input_dims_count > 0)) {
+      if (input_dims_count > 0) {
         total_batch_size += input_shape[0];
       } else {
         total_batch_size++;
