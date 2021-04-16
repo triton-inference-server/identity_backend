@@ -320,19 +320,20 @@ ModelState::ValidateModelConfig()
   if (model_config_.Find("parameters", &params)) {
     common::TritonJson::Value exec_delay;
     if (params.Find("execute_delay_ms", &exec_delay)) {
-      uint64_t delay = 0;
-      RETURN_IF_ERROR(exec_delay.AsUInt(&delay));
-      execute_delay_ms_ = delay;
+      std::string exec_delay_str;
+      RETURN_IF_ERROR(
+          exec_delay.MemberAsString("string_value", &exec_delay_str));
+      execute_delay_ms_ = std::stoi(exec_delay_str);
 
       // Apply delay multiplier based on instance index, this is not taking
       // multiple devices into consideration, so the behavior is best controlled
       // in single device case.
       common::TritonJson::Value delay_multiplier;
       if (params.Find("instance_wise_delay_multiplier", &delay_multiplier)) {
-        const char* cstr;
-        size_t len = 0;
-        RETURN_IF_ERROR(delay_multiplier.AsString(&cstr, &len));
-        delay_multiplier_ = std::stoi(cstr);
+        std::string delay_multiplier_str;
+        RETURN_IF_ERROR(delay_multiplier.MemberAsString(
+            "string_value", &delay_multiplier_str));
+        delay_multiplier_ = std::stoi(delay_multiplier_str);
       }
     }
   }
