@@ -975,7 +975,8 @@ TRITONBACKEND_ModelInstanceExecute(
       //      the output buffer.
       TRITONBACKEND_Response* response = responses[r];
 
-      // Step 1. Input and output have same datatype and shape/reshaped shape
+      // Step 1. Create an output tensor. Input and output have same datatype
+      // and shape/reshaped shape
       TRITONBACKEND_Output* output;
       GUARDED_RESPOND_IF_ERROR(
           responses, r,
@@ -991,9 +992,7 @@ TRITONBACKEND_ModelInstanceExecute(
         continue;
       }
 
-      // Step 2. Get the output buffer. We request a buffer in CPU memory but we
-      // have to handle any returned type. If we get back a buffer in GPU memory
-      // we just fail the request.
+      // Step 2. Get the output buffer.
       void* output_buffer;
       TRITONSERVER_MemoryType output_memory_type = TRITONSERVER_MEMORY_CPU;
       int64_t output_memory_type_id = 0;
@@ -1033,8 +1032,7 @@ TRITONBACKEND_ModelInstanceExecute(
         continue;
       }
 
-      // Step 3. Copy input -> output. We can only handle if the input buffers
-      // are on CPU so fail otherwise.
+      // Step 3. Copy input -> output
       size_t output_buffer_offset = 0;
       for (uint32_t b = 0; b < input_buffer_count; ++b) {
         const void* input_buffer = nullptr;
@@ -1113,7 +1111,7 @@ TRITONBACKEND_ModelInstanceExecute(
 
     uint64_t compute_end_ns = 0;
     SET_TIMESTAMP(compute_end_ns);
-    max_compute_end_ns = std::max(max_compute_end_ns, compute_end_ns);
+    max_compute_end_ns = compute_end_ns;
 
 #ifdef TRITON_ENABLE_GPU
     if (cuda_copy) {
@@ -1149,9 +1147,7 @@ TRITONBACKEND_ModelInstanceExecute(
     SET_TIMESTAMP(exec_end_ns);
     max_exec_end_ns = std::max(max_exec_end_ns, exec_end_ns);
 
-    // Report statistics for the successful request. For an instance using the
-    // CPU we don't associate any device with the statistics, otherwise we
-    // associate the instance's device.
+    // Report statistics for the successful request.
     LOG_IF_ERROR(
         TRITONBACKEND_ModelInstanceReportStatistics(
             instance_state->TritonModelInstance(), request, true /* success */,
