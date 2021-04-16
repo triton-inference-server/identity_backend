@@ -896,8 +896,7 @@ TRITONBACKEND_ModelInstanceExecute(
         LOG_MESSAGE(
             TRITONSERVER_LOG_ERROR,
             (std::string("request ") + std::to_string(r) +
-             ": failed to read requested output name, error response "
-             "sent")
+             ": failed to read requested output name, error response sent")
                 .c_str());
         continue;
       }
@@ -1007,22 +1006,7 @@ TRITONBACKEND_ModelInstanceExecute(
           TRITONBACKEND_OutputBuffer(
               output, &output_buffer, input_byte_size, &output_memory_type,
               &output_memory_type_id));
-#ifndef TRITON_ENABLE_GPU
-      if (output_memory_type == TRITONSERVER_MEMORY_GPU) {
-        GUARDED_RESPOND_IF_ERROR(
-            responses, r,
-            TRITONSERVER_ErrorNew(
-                TRITONSERVER_ERROR_UNSUPPORTED,
-                "failed to create output buffer in CPU memory"));
-        LOG_MESSAGE(
-            TRITONSERVER_LOG_ERROR,
-            (std::string("request ") + std::to_string(r) +
-             ": failed to create output buffer in CPU memory, error "
-             "response sent")
-                .c_str());
-        continue;
-      }
-#endif  // TRITON_ENABLE_GPU
+
       if (responses[r] == nullptr) {
         GUARDED_RESPOND_IF_ERROR(
             responses, r,
@@ -1032,8 +1016,7 @@ TRITONBACKEND_ModelInstanceExecute(
         LOG_MESSAGE(
             TRITONSERVER_LOG_ERROR,
             (std::string("request ") + std::to_string(r) +
-             ": failed to create output buffer, error "
-             "response sent")
+             ": failed to create output buffer, error response sent")
                 .c_str());
         continue;
       }
@@ -1050,22 +1033,6 @@ TRITONBACKEND_ModelInstanceExecute(
             TRITONBACKEND_InputBuffer(
                 input, b, &input_buffer, &buffer_byte_size, &input_memory_type,
                 &input_memory_type_id));
-#ifndef TRITON_ENABLE_GPU
-        if (input_memory_type == TRITONSERVER_MEMORY_GPU) {
-          GUARDED_RESPOND_IF_ERROR(
-              responses, r,
-              TRITONSERVER_ErrorNew(
-                  TRITONSERVER_ERROR_UNSUPPORTED,
-                  "failed to get input buffer in CPU memory"));
-          LOG_MESSAGE(
-              TRITONSERVER_LOG_ERROR,
-              (std::string("request ") + std::to_string(r) +
-               ": failed to get input buffer in CPU memory, error "
-               "response sent")
-                  .c_str());
-          continue;
-        }
-#endif  // TRITON_ENABLE_GPU
 
         if (responses[r] == nullptr) {
           GUARDED_RESPOND_IF_ERROR(
@@ -1076,8 +1043,7 @@ TRITONBACKEND_ModelInstanceExecute(
           LOG_MESSAGE(
               TRITONSERVER_LOG_ERROR,
               (std::string("request ") + std::to_string(r) +
-               ": failed to get input buffer, error "
-               "response sent")
+               ": failed to get input buffer, error response sent")
                   .c_str());
           continue;
         }
@@ -1101,8 +1067,7 @@ TRITONBACKEND_ModelInstanceExecute(
           LOG_MESSAGE(
               TRITONSERVER_LOG_ERROR,
               (std::string("request ") + std::to_string(r) +
-               ": failed to get copy buffer, error response "
-               "sent")
+               ": failed to get copy buffer, error response sent")
                   .c_str());
           continue;
         }
