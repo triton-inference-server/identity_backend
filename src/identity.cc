@@ -28,6 +28,8 @@
 #include <memory>
 #include <thread>
 #include "triton/backend/backend_common.h"
+#include "triton/backend/backend_model.h"
+#include "triton/backend/backend_model_instance.h"
 
 #ifdef TRITON_ENABLE_GPU
 #include <cuda_runtime_api.h>
@@ -35,14 +37,10 @@
 
 namespace triton { namespace backend { namespace identity {
 
-#ifndef TRITON_ENABLE_GPU
-using cudaStream_t = void*;
-#endif  // !TRITON_ENABLE_GPU
-
 //
-// Simple backend that demonstrates the TRITONBACKEND API for a
-// blocking backend. A blocking backend completes execution of the
-// inference before returning from TRITONBACKED_ModelInstanceExecute.
+// Simple backend that demonstrates the TRITONBACKEND API for a blocking
+// backend. A blocking backend completes execution of the inference before
+// returning from TRITONBACKEND_ModelInstanceExecute.
 //
 // This backend supports any model that has same number of inputs and outputs.
 // The input and output must follow a naming convention i.e INPUT<index> and
@@ -71,20 +69,13 @@ using cudaStream_t = void*;
 // ModelState
 //
 // State associated with a model that is using this backend. An object
-// of this class is created and associated with each
-// TRITONBACKEND_Model.
+// of this class is created and associated with each TRITONBACKEND_Model.
 //
-class ModelState {
+class ModelState : public BackendModel {
  public:
   static TRITONSERVER_Error* Create(
       TRITONBACKEND_Model* triton_model, ModelState** state);
-
-  // Get the handle to the TRITONBACKEND model.
-  TRITONBACKEND_Model* TritonModel() { return triton_model_; }
-
-  // Get the name and version of the model.
-  const std::string& Name() const { return name_; }
-  uint64_t Version() const { return version_; }
+  virtual ~ModelState() = default;
 
   // Get execution delay and delay multiplier
   uint64_t ExecDelay() const { return execute_delay_ms_; }
@@ -92,11 +83,6 @@ class ModelState {
 
   // Stores the instance count
   size_t instance_count_;
-
-  // Does this model support batching in the first dimension. This
-  // function should not be called until after the model is completely
-  // loaded.
-  TRITONSERVER_Error* SupportsFirstDimBatching(bool* supports);
 
   // Validate that model configuration is supported by this backend.
   TRITONSERVER_Error* ValidateModelConfig();
@@ -106,92 +92,33 @@ class ModelState {
   TRITONSERVER_Error* CreationDelay();
 
  private:
-  ModelState(
-      TRITONSERVER_Server* triton_server, TRITONBACKEND_Model* triton_model,
-      const char* name, const uint64_t version,
-      common::TritonJson::Value&& model_config);
-
-  TRITONSERVER_Server* triton_server_;
-  TRITONBACKEND_Model* triton_model_;
-  const std::string name_;
-  const uint64_t version_;
-  common::TritonJson::Value model_config_;
+  ModelState(TRITONBACKEND_Model* triton_model);
 
   // Delay time and multiplier to introduce into execution, in milliseconds.
   int execute_delay_ms_;
   int delay_multiplier_;
-
-  bool supports_batching_initialized_;
-  bool supports_batching_;
 };
 
 TRITONSERVER_Error*
 ModelState::Create(TRITONBACKEND_Model* triton_model, ModelState** state)
 {
-  TRITONSERVER_Message* config_message;
-  RETURN_IF_ERROR(TRITONBACKEND_ModelConfig(
-      triton_model, 1 /* config_version */, &config_message));
-
-  // We can get the model configuration as a json string from
-  // config_message, parse it with our favorite json parser to create
-  // DOM that we can access when we need to example the
-  // configuration. We use TritonJson, which is a wrapper that returns
-  // nice errors (currently the underlying implementation is
-  // rapidjson... but others could be added). You can use any json
-  // parser you prefer.
-  const char* buffer;
-  size_t byte_size;
-  RETURN_IF_ERROR(
-      TRITONSERVER_MessageSerializeToJson(config_message, &buffer, &byte_size));
-
-  common::TritonJson::Value model_config;
-  TRITONSERVER_Error* err = model_config.Parse(buffer, byte_size);
-  RETURN_IF_ERROR(TRITONSERVER_MessageDelete(config_message));
-  RETURN_IF_ERROR(err);
-
-  const char* model_name;
-  RETURN_IF_ERROR(TRITONBACKEND_ModelName(triton_model, &model_name));
-
-  uint64_t model_version;
-  RETURN_IF_ERROR(TRITONBACKEND_ModelVersion(triton_model, &model_version));
-
-  TRITONSERVER_Server* triton_server;
-  RETURN_IF_ERROR(TRITONBACKEND_ModelServer(triton_model, &triton_server));
-
-  *state = new ModelState(
-      triton_server, triton_model, model_name, model_version,
-      std::move(model_config));
-  return nullptr;  // success
-}
-
-ModelState::ModelState(
-    TRITONSERVER_Server* triton_server, TRITONBACKEND_Model* triton_model,
-    const char* name, const uint64_t version,
-    common::TritonJson::Value&& model_config)
-    : instance_count_(0), triton_server_(triton_server),
-      triton_model_(triton_model), name_(name), version_(version),
-      model_config_(std::move(model_config)), execute_delay_ms_(0),
-      delay_multiplier_(0), supports_batching_initialized_(false),
-      supports_batching_(false)
-{
-}
-
-TRITONSERVER_Error*
-ModelState::SupportsFirstDimBatching(bool* supports)
-{
-  // We can't determine this during model initialization because
-  // TRITONSERVER_ServerModelBatchProperties can't be called until the
-  // model is loaded. So we just cache it here.
-  if (!supports_batching_initialized_) {
-    uint32_t flags = 0;
-    RETURN_IF_ERROR(TRITONSERVER_ServerModelBatchProperties(
-        triton_server_, name_.c_str(), version_, &flags, nullptr /* voidp */));
-    supports_batching_ = ((flags & TRITONSERVER_BATCH_FIRST_DIM) != 0);
-    supports_batching_initialized_ = true;
+  try {
+    *state = new ModelState(triton_model);
+  }
+  catch (const BackendModelException& ex) {
+    RETURN_ERROR_IF_TRUE(
+        ex.err_ == nullptr, TRITONSERVER_ERROR_INTERNAL,
+        std::string("unexpected nullptr in BackendModelException"));
+    RETURN_IF_ERROR(ex.err_);
   }
 
-  *supports = supports_batching_;
   return nullptr;  // success
+}
+
+ModelState::ModelState(TRITONBACKEND_Model* triton_model)
+    : BackendModel(triton_model), instance_count_(0), execute_delay_ms_(0),
+      delay_multiplier_(0)
+{
 }
 
 TRITONSERVER_Error*
@@ -209,7 +136,7 @@ ModelState::CreationDelay()
           "string_value", &creation_delay_sec_str));
       LOG_MESSAGE(
           TRITONSERVER_LOG_INFO,
-          (std::string("Creation delay is set to : ") + creation_delay_sec_str)
+          (std::string("Creation delay is set to: ") + creation_delay_sec_str)
               .c_str());
       std::this_thread::sleep_for(
           std::chrono::seconds(std::stoi(creation_delay_sec_str)));
@@ -351,48 +278,28 @@ ModelState::ValidateModelConfig()
 // State associated with a model instance. An object of this class is
 // created and associated with each TRITONBACKEND_ModelInstance.
 //
-class ModelInstanceState {
+class ModelInstanceState : public BackendModelInstance {
  public:
   static TRITONSERVER_Error* Create(
       ModelState* model_state,
       TRITONBACKEND_ModelInstance* triton_model_instance,
       ModelInstanceState** state);
-  ~ModelInstanceState();
-
-  // Get the handle to the TRITONBACKEND model instance.
-  TRITONBACKEND_ModelInstance* TritonModelInstance()
-  {
-    return triton_model_instance_;
-  }
-
-  // Get the name, kind, device ID and instance ID of the instance.
-  const std::string& Name() const { return name_; }
-  TRITONSERVER_InstanceGroupKind Kind() const { return kind_; }
-  int32_t DeviceId() const { return device_id_; }
-  size_t InstanceId() const { return instance_id_; }
+  virtual ~ModelInstanceState();
 
   // Get the state of the model that corresponds to this instance.
   ModelState* StateForModel() const { return model_state_; }
 
-  // Returns the stream associated with this instance that can be used
-  // for GPU<->CPU memory transfers. Returns nullptr if GPU support is
-  // disabled or if this instance is not executing on a GPU.
-  cudaStream_t CudaStream() { return stream_; }
+  // Get the instance ID of the instance.
+  size_t InstanceId() const { return instance_id_; }
 
  private:
   ModelInstanceState(
       ModelState* model_state,
-      TRITONBACKEND_ModelInstance* triton_model_instance, const char* name,
-      const TRITONSERVER_InstanceGroupKind kind, const int32_t device_id,
-      const size_t instance_id, cudaStream_t stream);
+      TRITONBACKEND_ModelInstance* triton_model_instance,
+      const size_t instance_id);
 
   ModelState* model_state_;
-  TRITONBACKEND_ModelInstance* triton_model_instance_;
-  const std::string name_;
-  const TRITONSERVER_InstanceGroupKind kind_;
-  const int32_t device_id_;
   const size_t instance_id_;
-  cudaStream_t stream_;
 };
 
 TRITONSERVER_Error*
@@ -412,44 +319,27 @@ ModelInstanceState::Create(
   RETURN_IF_ERROR(
       TRITONBACKEND_ModelInstanceDeviceId(triton_model_instance, &device_id));
 
-  cudaStream_t stream = nullptr;
-  if (instance_kind == TRITONSERVER_INSTANCEGROUPKIND_GPU) {
-    RETURN_IF_ERROR(
-        CreateCudaStream(device_id, 0 /* cuda_stream_priority */, &stream));
+  try {
+    *state = new ModelInstanceState(
+        model_state, triton_model_instance, model_state->instance_count_);
+  }
+  catch (const BackendModelInstanceException& ex) {
+    RETURN_ERROR_IF_TRUE(
+        ex.err_ == nullptr, TRITONSERVER_ERROR_INTERNAL,
+        std::string("unexpected nullptr in BackendModelInstanceException"));
+    RETURN_IF_ERROR(ex.err_);
   }
 
-  *state = new ModelInstanceState(
-      model_state, triton_model_instance, instance_name, instance_kind,
-      device_id, model_state->instance_count_, stream);
   model_state->instance_count_++;
   return nullptr;  // success
 }
 
 ModelInstanceState::ModelInstanceState(
     ModelState* model_state, TRITONBACKEND_ModelInstance* triton_model_instance,
-    const char* name, const TRITONSERVER_InstanceGroupKind kind,
-    const int32_t device_id, const size_t instance_id, cudaStream_t stream)
-    : model_state_(model_state), triton_model_instance_(triton_model_instance),
-      name_(name), kind_(kind), device_id_(device_id),
-      instance_id_(instance_id), stream_(stream)
+    const size_t instance_id)
+    : BackendModelInstance(model_state, triton_model_instance),
+      instance_id_(instance_id)
 {
-}
-
-ModelInstanceState::~ModelInstanceState()
-{
-#ifdef TRITON_ENABLE_GPU
-  if (stream_ != nullptr) {
-    cudaError_t err = cudaStreamDestroy(stream_);
-    if (err != cudaSuccess) {
-      LOG_MESSAGE(
-          TRITONSERVER_LOG_ERROR,
-          (std::string("~ModelInstanceState: ") + name_ +
-           " failed to destroy cuda stream: " + cudaGetErrorString(err))
-              .c_str());
-    }
-    stream_ = nullptr;
-  }
-#endif  // TRITON_ENABLE_GPU
 }
 
 /////////////
@@ -1078,12 +968,6 @@ TRITONBACKEND_ModelInstanceExecute(
     uint64_t compute_end_ns = 0;
     SET_TIMESTAMP(compute_end_ns);
     max_compute_end_ns = compute_end_ns;
-
-#ifdef TRITON_ENABLE_GPU
-    if (cuda_copy) {
-      cudaStreamSynchronize(instance_state->CudaStream());
-    }
-#endif  // TRITON_ENABLE_GPU
 
     // To demonstrate response parameters we attach some here. Most responses do
     // not use parameters but they provide a way for backends to communicate
