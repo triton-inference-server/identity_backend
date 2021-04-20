@@ -79,7 +79,7 @@ class ModelState : public BackendModel {
 
   // Get execution delay and delay multiplier
   uint64_t ExecDelay() const { return execute_delay_ms_; }
-  uint64_t Multiplier() const { return delay_multiplier_; }
+  uint64_t DelayMultiplier() const { return delay_multiplier_; }
 
   // Stores the instance count
   size_t instance_count_;
@@ -607,7 +607,7 @@ TRITONBACKEND_ModelInstanceExecute(
   // Delay if requested...
   if (model_state->ExecDelay() > 0) {
     int multiplier = 1;
-    if (model_state->Multiplier() > 0) {
+    if (model_state->DelayMultiplier() > 0) {
       multiplier *= instance_state->InstanceId();
       multiplier = std::max(multiplier, 1);
     }
