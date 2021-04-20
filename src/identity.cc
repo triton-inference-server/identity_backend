@@ -284,7 +284,7 @@ class ModelInstanceState : public BackendModelInstance {
       ModelState* model_state,
       TRITONBACKEND_ModelInstance* triton_model_instance,
       ModelInstanceState** state);
-  virtual ~ModelInstanceState();
+  virtual ~ModelInstanceState() = default;
 
   // Get the state of the model that corresponds to this instance.
   ModelState* StateForModel() const { return model_state_; }
