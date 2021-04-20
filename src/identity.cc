@@ -142,6 +142,7 @@ ModelState::CreationDelay()
           std::chrono::seconds(std::stoi(creation_delay_sec_str)));
     }
   }
+
   return nullptr;  // success
 }
 
@@ -307,18 +308,6 @@ ModelInstanceState::Create(
     ModelState* model_state, TRITONBACKEND_ModelInstance* triton_model_instance,
     ModelInstanceState** state)
 {
-  const char* instance_name;
-  RETURN_IF_ERROR(
-      TRITONBACKEND_ModelInstanceName(triton_model_instance, &instance_name));
-
-  TRITONSERVER_InstanceGroupKind instance_kind;
-  RETURN_IF_ERROR(
-      TRITONBACKEND_ModelInstanceKind(triton_model_instance, &instance_kind));
-
-  int32_t device_id;
-  RETURN_IF_ERROR(
-      TRITONBACKEND_ModelInstanceDeviceId(triton_model_instance, &device_id));
-
   try {
     *state = new ModelInstanceState(
         model_state, triton_model_instance, model_state->instance_count_);
@@ -338,7 +327,7 @@ ModelInstanceState::ModelInstanceState(
     ModelState* model_state, TRITONBACKEND_ModelInstance* triton_model_instance,
     const size_t instance_id)
     : BackendModelInstance(model_state, triton_model_instance),
-      instance_id_(instance_id)
+      model_state_(model_state), instance_id_(instance_id)
 {
 }
 
@@ -476,8 +465,7 @@ TRITONBACKEND_ModelInitialize(TRITONBACKEND_Model* model)
       TRITONSERVER_LOG_INFO,
       (std::string("backend state is '") + *backend_state + "'").c_str());
 
-  // With each model we create a ModelState object and associate it
-  // with the TRITONBACKEND_Model.
+  // Create a ModelState object and associate it with the TRITONBACKEND_Model.
   ModelState* model_state;
   RETURN_IF_ERROR(ModelState::Create(model, &model_state));
   RETURN_IF_ERROR(
