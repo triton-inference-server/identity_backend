@@ -957,6 +957,12 @@ TRITONBACKEND_ModelInstanceExecute(
     SET_TIMESTAMP(compute_end_ns);
     max_compute_end_ns = compute_end_ns;
 
+#ifdef TRITON_ENABLE_GPU
+    if (cuda_copy) {
+      cudaStreamSynchronize(instance_state->CudaStream());
+    }
+#endif  // TRITON_ENABLE_GPU
+
     // To demonstrate response parameters we attach some here. Most responses do
     // not use parameters but they provide a way for backends to communicate
     // arbitrary information along with the response.
