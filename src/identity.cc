@@ -604,17 +604,6 @@ TRITONBACKEND_ModelInstanceExecute(
        " requests")
           .c_str());
 
-  // Delay if requested...
-  if (model_state->ExecDelay() > 0) {
-    int multiplier = 1;
-    if (model_state->DelayMultiplier() > 0) {
-      multiplier *= instance_state->InstanceId();
-      multiplier = std::max(multiplier, 1);
-    }
-    std::this_thread::sleep_for(
-        std::chrono::milliseconds(model_state->ExecDelay() * multiplier));
-  }
-
   bool supports_batching = false;
   RETURN_IF_ERROR(model_state->SupportsFirstDimBatching(&supports_batching));
 
@@ -636,6 +625,11 @@ TRITONBACKEND_ModelInstanceExecute(
     responses.push_back(response);
   }
 
+  // After this point we take ownership of 'requests', which means
+  // that a response must be sent for every request. If something does
+  // go wrong in processing a particular request then we send an error
+  // response just for the specific request.
+
   // The way we collect these batch timestamps is not entirely
   // accurate. Normally, in a performant backend you would execute all
   // the requests at the same time, and so there would be a single
@@ -649,10 +643,16 @@ TRITONBACKEND_ModelInstanceExecute(
   uint64_t max_exec_end_ns = 0;
   uint64_t total_batch_size = 0;
 
-  // After this point we take ownership of 'requests', which means
-  // that a response must be sent for every request. If something does
-  // go wrong in processing a particular request then we send an error
-  // response just for the specific request.
+  // Delay if requested...
+  if (model_state->ExecDelay() > 0) {
+    int multiplier = 1;
+    if (model_state->DelayMultiplier() > 0) {
+      multiplier *= instance_state->InstanceId();
+      multiplier = std::max(multiplier, 1);
+    }
+    std::this_thread::sleep_for(
+        std::chrono::milliseconds(model_state->ExecDelay() * multiplier));
+  }
 
   // For simplicity we just process each request separately... in
   // general a backend should try to operate on the entire batch of
