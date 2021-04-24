@@ -645,8 +645,8 @@ TRITONBACKEND_ModelInstanceExecute(
   // well.
   uint64_t min_exec_start_ns = std::numeric_limits<uint64_t>::max();
   uint64_t min_compute_start_ns = min_exec_start_ns;
-  uint64_t max_exec_end_ns = 0;
   uint64_t max_compute_end_ns = 0;
+  uint64_t max_exec_end_ns = 0;
   uint64_t total_batch_size = 0;
 
   // After this point we take ownership of 'requests', which means
@@ -953,15 +953,15 @@ TRITONBACKEND_ModelInstanceExecute(
       }
     }
 
-    uint64_t compute_end_ns = 0;
-    SET_TIMESTAMP(compute_end_ns);
-    max_compute_end_ns = compute_end_ns;
-
 #ifdef TRITON_ENABLE_GPU
     if (cuda_copy) {
       cudaStreamSynchronize(instance_state->CudaStream());
     }
 #endif  // TRITON_ENABLE_GPU
+
+    uint64_t compute_end_ns = 0;
+    SET_TIMESTAMP(compute_end_ns);
+    max_compute_end_ns = std::max(max_compute_end_ns, compute_end_ns);
 
     // To demonstrate response parameters we attach some here. Most responses do
     // not use parameters but they provide a way for backends to communicate
@@ -994,8 +994,9 @@ TRITONBACKEND_ModelInstanceExecute(
     // Report statistics for the successful request.
     LOG_IF_ERROR(
         TRITONBACKEND_ModelInstanceReportStatistics(
-            instance_state->TritonModelInstance(), request, true /* success */,
-            exec_start_ns, compute_start_ns, compute_end_ns, exec_end_ns),
+            instance_state->TritonModelInstance(), request,
+            (responses[r] != nullptr) /* success */, exec_start_ns,
+            compute_start_ns, compute_end_ns, exec_end_ns),
         "failed reporting request statistics");
   }
 
