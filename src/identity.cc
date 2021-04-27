@@ -604,6 +604,9 @@ TRITONBACKEND_ModelInstanceExecute(
        " requests")
           .c_str());
 
+  uint64_t exec_start_ns = 0;
+  SET_TIMESTAMP(exec_start_ns);
+
   bool supports_batching = false;
   RETURN_IF_ERROR(model_state->SupportsFirstDimBatching(&supports_batching));
 
@@ -637,31 +640,27 @@ TRITONBACKEND_ModelInstanceExecute(
   // request separately so there is no single range. As a result we
   // just show the entire execute time as being the compute time as
   // well.
-  uint64_t min_exec_start_ns = std::numeric_limits<uint64_t>::max();
-  uint64_t min_compute_start_ns = min_exec_start_ns;
-  uint64_t max_compute_end_ns = 0;
-  uint64_t max_exec_end_ns = 0;
-  uint64_t total_batch_size = 0;
+
+  uint64_t compute_start_ns = 0;
+  SET_TIMESTAMP(compute_start_ns);
 
   // Delay if requested...
   if (model_state->ExecDelay() > 0) {
-    int multiplier = 1;
+    int multiplier = model_state->DelayMultiplier();
+
     if (model_state->DelayMultiplier() > 0) {
       multiplier *= instance_state->InstanceId();
-      multiplier = std::max(multiplier, 1);
     }
-    std::this_thread::sleep_for(
-        std::chrono::milliseconds(model_state->ExecDelay() * multiplier));
+    std::this_thread::sleep_for(std::chrono::milliseconds(
+        model_state->ExecDelay() * std::max(multiplier, 1)));
   }
 
   // For simplicity we just process each request separately... in
   // general a backend should try to operate on the entire batch of
   // requests at the same time for improved performance.
+  uint64_t total_batch_size = 0;
+  bool cuda_copy = false;
   for (uint32_t r = 0; r < request_count; ++r) {
-    uint64_t exec_start_ns = 0;
-    SET_TIMESTAMP(exec_start_ns);
-    min_exec_start_ns = std::min(min_exec_start_ns, exec_start_ns);
-
     TRITONBACKEND_Request* request = requests[r];
 
     const char* request_id = "";
@@ -700,8 +699,6 @@ TRITONBACKEND_ModelInstanceExecute(
          ", input_count = " + std::to_string(input_count) +
          ", requested_output_count = " + std::to_string(requested_output_count))
             .c_str());
-
-    bool cuda_copy = false;
 
     // Collect all input names outputs
     std::set<std::string> input_names;
@@ -754,10 +751,6 @@ TRITONBACKEND_ModelInstanceExecute(
         total_batch_size++;
       }
     }
-
-    uint64_t compute_start_ns = 0;
-    SET_TIMESTAMP(compute_start_ns);
-    min_compute_start_ns = std::min(min_compute_start_ns, compute_start_ns);
 
     // We validated that the model configuration specifies N inputs, but the
     // request is not required to request any output at all so we only produce
@@ -953,16 +946,6 @@ TRITONBACKEND_ModelInstanceExecute(
       }
     }
 
-#ifdef TRITON_ENABLE_GPU
-    if (cuda_copy) {
-      cudaStreamSynchronize(instance_state->CudaStream());
-    }
-#endif  // TRITON_ENABLE_GPU
-
-    uint64_t compute_end_ns = 0;
-    SET_TIMESTAMP(compute_end_ns);
-    max_compute_end_ns = std::max(max_compute_end_ns, compute_end_ns);
-
     // To demonstrate response parameters we attach some here. Most responses do
     // not use parameters but they provide a way for backends to communicate
     // arbitrary information along with the response.
@@ -976,66 +959,57 @@ TRITONBACKEND_ModelInstanceExecute(
     LOG_IF_ERROR(
         TRITONBACKEND_ResponseSetBoolParameter(responses[r], "param2", false),
         "failed setting boolean parameter");
+  }
 
-    // If we get to this point then there hasn't been any error and the response
-    // is complete and we can send it. This is the last (and only) response that
-    // we are sending for the request so we must mark it FINAL. If there is an
-    // error when sending all we can do is log it.
-    LOG_IF_ERROR(
-        TRITONBACKEND_ResponseSend(
-            responses[r], TRITONSERVER_RESPONSE_COMPLETE_FINAL,
-            nullptr /* success */),
-        "failed sending response");
+  uint64_t compute_end_ns = 0;
+  SET_TIMESTAMP(compute_end_ns);
 
-    uint64_t exec_end_ns = 0;
-    SET_TIMESTAMP(exec_end_ns);
-    max_exec_end_ns = std::max(max_exec_end_ns, exec_end_ns);
+#ifdef TRITON_ENABLE_GPU
+  if (cuda_copy) {
+    cudaStreamSynchronize(instance_state->CudaStream());
+  }
+#endif  // TRITON_ENABLE_GPU
 
-    // Report statistics for the successful request.
+  uint64_t exec_end_ns = 0;
+  SET_TIMESTAMP(exec_end_ns);
+
+  // If we get to this point then there hasn't been any error and the response
+  // is complete and we can send it. This is the last (and only) response that
+  // we are sending for the request so we must mark it FINAL. If there is an
+  // error when sending all we can do is log it.
+  for (auto& response : responses) {
+    if (response != nullptr) {
+      LOG_IF_ERROR(
+          TRITONBACKEND_ResponseSend(
+              response, TRITONSERVER_RESPONSE_COMPLETE_FINAL, nullptr),
+          "failed sending response");
+    }
+  }
+
+  // There are two types of statistics that we can report... the statistics for
+  // the entire batch of requests that we just executed and statistics for each
+  // individual request. Here we report statistics for each request.
+  for (uint32_t r = 0; r < request_count; ++r) {
+    TRITONBACKEND_Request* request = requests[r];
+
     LOG_IF_ERROR(
         TRITONBACKEND_ModelInstanceReportStatistics(
             instance_state->TritonModelInstance(), request,
             (responses[r] != nullptr) /* success */, exec_start_ns,
             compute_start_ns, compute_end_ns, exec_end_ns),
         "failed reporting request statistics");
-  }
-
-  // Done with requests...
-
-  // There are two types of statistics that we can report... the statistics for
-  // the entire batch of requests that we just executed and statistics for each
-  // individual request. Statistics for each individual request were reported
-  // above inside the loop as each request was processed (or for failed requests
-  // we report that failure below). Here we report statistics for the entire
-  // batch of requests.
-  LOG_IF_ERROR(
-      TRITONBACKEND_ModelInstanceReportBatchStatistics(
-          instance_state->TritonModelInstance(), total_batch_size,
-          min_exec_start_ns, min_compute_start_ns, max_compute_end_ns,
-          max_exec_end_ns),
-      "failed reporting batch request statistics");
-
-  // We could have released each request as soon as we sent the corresponding
-  // response. But for clarity we just release them all here. Note that is
-  // something goes wrong when releasing a request all we can do is log it...
-  // there is no response left to use to report an error.
-  for (uint32_t r = 0; r < request_count; ++r) {
-    TRITONBACKEND_Request* request = requests[r];
-
-    // Before releasing, record failed requests as those where responses[r] is
-    // nullptr. The timestamps are ignored in this case.
-    if (responses[r] == nullptr) {
-      LOG_IF_ERROR(
-          TRITONBACKEND_ModelInstanceReportStatistics(
-              instance_state->TritonModelInstance(), request,
-              false /* success */, 0, 0, 0, 0),
-          "failed reporting request statistics");
-    }
 
     LOG_IF_ERROR(
         TRITONBACKEND_RequestRelease(request, TRITONSERVER_REQUEST_RELEASE_ALL),
         "failed releasing request");
   }
+
+  // Here we report statistics for the entire batch of requests.
+  LOG_IF_ERROR(
+      TRITONBACKEND_ModelInstanceReportBatchStatistics(
+          instance_state->TritonModelInstance(), total_batch_size,
+          exec_start_ns, compute_start_ns, compute_end_ns, exec_end_ns),
+      "failed reporting batch request statistics");
 
   return nullptr;  // success
 }
