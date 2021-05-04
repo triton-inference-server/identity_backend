@@ -598,7 +598,7 @@ TRITONBACKEND_ModelInstanceExecute(
   // another call to TRITONBACKEND_ModelInstanceExecute.
 
   LOG_MESSAGE(
-      TRITONSERVER_LOG_INFO,
+      TRITONSERVER_LOG_VERBOSE,
       (std::string("model ") + model_state->Name() + ", instance " +
        instance_state->Name() + ", executing " + std::to_string(request_count) +
        " requests")
@@ -693,7 +693,7 @@ TRITONBACKEND_ModelInstanceExecute(
     }
 
     LOG_MESSAGE(
-        TRITONSERVER_LOG_INFO,
+        TRITONSERVER_LOG_VERBOSE,
         (std::string("request ") + std::to_string(r) + ": id = \"" +
          request_id + "\", correlation_id = " + std::to_string(correlation_id) +
          ", input_count = " + std::to_string(input_count) +
@@ -826,7 +826,7 @@ TRITONBACKEND_ModelInstanceExecute(
       }
 
       LOG_MESSAGE(
-          TRITONSERVER_LOG_INFO,
+          TRITONSERVER_LOG_VERBOSE,
           (std::string("\tinput ") + input_name + ": datatype = " +
            TRITONSERVER_DataTypeString(input_datatype) + ", shape = " +
            backend::ShapeToString(input_shape, input_dims_count) +
@@ -835,7 +835,7 @@ TRITONBACKEND_ModelInstanceExecute(
               .c_str());
 
       LOG_MESSAGE(
-          TRITONSERVER_LOG_INFO,
+          TRITONSERVER_LOG_VERBOSE,
           (std::string("\trequested_output ") + output_name).c_str());
 
       // This backend simply copies the output tensors from the corresponding
