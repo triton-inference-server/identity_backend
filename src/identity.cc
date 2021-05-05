@@ -27,6 +27,7 @@
 #include <map>
 #include <memory>
 #include <thread>
+
 #include "triton/backend/backend_common.h"
 #include "triton/backend/backend_model.h"
 #include "triton/backend/backend_model_instance.h"
@@ -700,14 +701,14 @@ TRITONBACKEND_ModelInstanceExecute(
          ", requested_output_count = " + std::to_string(requested_output_count))
             .c_str());
 
-    // Collect all input names outputs
-    std::set<std::string> input_names;
+    // Collect all input indices
+    std::set<int32_t> input_indices;
     for (uint32_t io_index = 0; io_index < input_count; io_index++) {
       const char* input_name;
       GUARDED_RESPOND_IF_ERROR(
           responses, r,
           TRITONBACKEND_RequestInputName(request, io_index, &input_name));
-      input_names.insert(input_name);
+      input_indices.insert(std::stoi(std::string(input_name, 5, -1)));
     }
 
     // For statistics we need to collect the total batch size of all the
@@ -772,13 +773,13 @@ TRITONBACKEND_ModelInstanceExecute(
         continue;
       }
 
-      std::string input_name_str = "INPUT" + std::string(output_name, 6, -1);
-      const char* input_name = input_name_str.c_str();
+      std::string index_str = std::string(output_name, 6, -1);
+      std::string input_name = "INPUT" + index_str;
       TRITONBACKEND_Input* input = nullptr;
-      if (input_names.find(input_name_str) != input_names.end()) {
+      if (input_indices.find(std::stoi(index_str)) != input_indices.end()) {
         GUARDED_RESPOND_IF_ERROR(
             responses, r,
-            TRITONBACKEND_RequestInput(request, input_name, &input));
+            TRITONBACKEND_RequestInput(request, input_name.c_str(), &input));
 
         // If an error response was sent while getting the input then display an
         // error message and move on to next request.
@@ -795,13 +796,11 @@ TRITONBACKEND_ModelInstanceExecute(
             responses, r,
             TRITONSERVER_ErrorNew(
                 TRITONSERVER_ERROR_UNSUPPORTED,
-                ("failed to get input '" + std::string(input_name) + "'")
-                    .c_str()));
+                ("failed to get input '" + input_name + "'").c_str()));
         LOG_MESSAGE(
             TRITONSERVER_LOG_ERROR,
             (std::string("request ") + std::to_string(r) +
-             ": failed to get input '" + std::string(input_name) +
-             "', error response sent")
+             ": failed to get input '" + input_name + "', error response sent")
                 .c_str());
         continue;
       }
