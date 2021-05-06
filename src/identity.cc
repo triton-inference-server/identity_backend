@@ -517,7 +517,7 @@ TRITONBACKEND_ModelInstanceInitialize(TRITONBACKEND_ModelInstance* instance)
   RETURN_IF_ERROR(TRITONBACKEND_ModelInstanceKind(instance, &kind));
 
 #ifdef TRITON_ENABLE_GPU
-  if (kind == TRITONSERVER_INSTANCEGROUPKIND_CPU) {
+  if (kind == TRITONSERVER_INSTANCEGROUPKIND_GPU) {
     cudaSetDevice(device_id);
   }
 #endif  // TRITON_ENABLE_GPU
@@ -570,6 +570,12 @@ TRITONBACKEND_ModelInstanceFinalize(TRITONBACKEND_ModelInstance* instance)
   ModelInstanceState* instance_state =
       reinterpret_cast<ModelInstanceState*>(vstate);
 
+#ifdef TRITON_ENABLE_GPU
+  if (instance_state->Kind() == TRITONSERVER_INSTANCEGROUPKIND_GPU) {
+    cudaSetDevice(instance_state->DeviceId());
+  }
+#endif  // TRITON_ENABLE_GPU
+
   LOG_MESSAGE(
       TRITONSERVER_LOG_INFO,
       "TRITONBACKEND_ModelInstanceFinalize: delete instance state");
@@ -598,7 +604,7 @@ TRITONBACKEND_ModelInstanceExecute(
   ModelState* model_state = instance_state->StateForModel();
 
 #ifdef TRITON_ENABLE_GPU
-  if (instance_state->Kind() == TRITONSERVER_INSTANCEGROUPKIND_CPU) {
+  if (instance_state->Kind() == TRITONSERVER_INSTANCEGROUPKIND_GPU) {
     cudaSetDevice(instance_state->DeviceId());
   }
 #endif  // TRITON_ENABLE_GPU
