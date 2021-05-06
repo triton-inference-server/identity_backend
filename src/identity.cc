@@ -516,6 +516,12 @@ TRITONBACKEND_ModelInstanceInitialize(TRITONBACKEND_ModelInstance* instance)
   TRITONSERVER_InstanceGroupKind kind;
   RETURN_IF_ERROR(TRITONBACKEND_ModelInstanceKind(instance, &kind));
 
+#ifdef TRITON_ENABLE_GPU
+  if (kind == TRITONSERVER_INSTANCEGROUPKIND_GPU) {
+    cudaSetDevice(device_id);
+  }
+#endif  // TRITON_ENABLE_GPU
+
   LOG_MESSAGE(
       TRITONSERVER_LOG_INFO,
       (std::string("TRITONBACKEND_ModelInstanceInitialize: ") + name + " (" +
@@ -564,6 +570,12 @@ TRITONBACKEND_ModelInstanceFinalize(TRITONBACKEND_ModelInstance* instance)
   ModelInstanceState* instance_state =
       reinterpret_cast<ModelInstanceState*>(vstate);
 
+#ifdef TRITON_ENABLE_GPU
+  if (instance_state->Kind() == TRITONSERVER_INSTANCEGROUPKIND_GPU) {
+    cudaSetDevice(instance_state->DeviceId());
+  }
+#endif  // TRITON_ENABLE_GPU
+
   LOG_MESSAGE(
       TRITONSERVER_LOG_INFO,
       "TRITONBACKEND_ModelInstanceFinalize: delete instance state");
@@ -590,6 +602,12 @@ TRITONBACKEND_ModelInstanceExecute(
   RETURN_IF_ERROR(TRITONBACKEND_ModelInstanceState(
       instance, reinterpret_cast<void**>(&instance_state)));
   ModelState* model_state = instance_state->StateForModel();
+
+#ifdef TRITON_ENABLE_GPU
+  if (instance_state->Kind() == TRITONSERVER_INSTANCEGROUPKIND_GPU) {
+    cudaSetDevice(instance_state->DeviceId());
+  }
+#endif  // TRITON_ENABLE_GPU
 
   // This backend specifies BLOCKING execution policy. That means that
   // we should not return from this function until execution is
@@ -646,13 +664,14 @@ TRITONBACKEND_ModelInstanceExecute(
 
   // Delay if requested...
   if (model_state->ExecDelay() > 0) {
-    int multiplier = model_state->DelayMultiplier();
+    uint64_t multiplier = model_state->DelayMultiplier();
 
     if (model_state->DelayMultiplier() > 0) {
       multiplier *= instance_state->InstanceId();
     }
-    std::this_thread::sleep_for(std::chrono::milliseconds(
-        model_state->ExecDelay() * std::max(multiplier, 1)));
+    uint64_t delay_ms =
+        model_state->ExecDelay() * std::max(multiplier, uint64_t(1));
+    std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
   }
 
   // For simplicity we just process each request separately... in
