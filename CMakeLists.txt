@@ -112,13 +112,21 @@ target_link_libraries(
     triton-backend-utils    # from repo-backend
 )
 
-set_target_properties(
-  triton-identity-backend PROPERTIES
-  POSITION_INDEPENDENT_CODE ON
-  OUTPUT_NAME triton_identity
-  LINK_DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/libtriton_identity.ldscript
-  LINK_FLAGS "-Wl,--version-script libtriton_identity.ldscript"
-)
+if(WIN32)
+  set_target_properties(
+    triton-identity-backend PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    OUTPUT_NAME triton_identity
+  )
+else()
+  set_target_properties(
+    triton-identity-backend PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    OUTPUT_NAME triton_identity
+    LINK_DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/libtriton_identity.ldscript
+    LINK_FLAGS "-Wl,--version-script libtriton_identity.ldscript"
+  )
+endif()
 
 #
 # Install
