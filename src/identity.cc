@@ -339,7 +339,7 @@ extern "C" {
 // Implementing TRITONBACKEND_Initialize is optional. The backend
 // should initialize any global state that is intended to be shared
 // across all models and model instances that use the backend.
-TRITONSERVER_Error*
+TRITONBACKEND_ISPEC TRITONSERVER_Error*
 TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
 {
   const char* cname;
@@ -404,7 +404,7 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
 // Implementing TRITONBACKEND_Finalize is optional unless state is set
 // using TRITONBACKEND_BackendSetState. The backend must free this
 // state and perform any other global cleanup.
-TRITONSERVER_Error*
+TRITONBACKEND_ISPEC TRITONSERVER_Error*
 TRITONBACKEND_Finalize(TRITONBACKEND_Backend* backend)
 {
   void* vstate;
@@ -424,7 +424,7 @@ TRITONBACKEND_Finalize(TRITONBACKEND_Backend* backend)
 // Implementing TRITONBACKEND_ModelInitialize is optional. The backend
 // should initialize any state that is intended to be shared across
 // all instances of the model.
-TRITONSERVER_Error*
+TRITONBACKEND_ISPEC TRITONSERVER_Error*
 TRITONBACKEND_ModelInitialize(TRITONBACKEND_Model* model)
 {
   const char* cname;
@@ -487,7 +487,7 @@ TRITONBACKEND_ModelInitialize(TRITONBACKEND_Model* model)
 // Implementing TRITONBACKEND_ModelFinalize is optional unless state
 // is set using TRITONBACKEND_ModelSetState. The backend must free
 // this state and perform any other cleanup.
-TRITONSERVER_Error*
+TRITONBACKEND_ISPEC TRITONSERVER_Error*
 TRITONBACKEND_ModelFinalize(TRITONBACKEND_Model* model)
 {
   void* vstate;
@@ -505,7 +505,7 @@ TRITONBACKEND_ModelFinalize(TRITONBACKEND_Model* model)
 // Implementing TRITONBACKEND_ModelInstanceInitialize is optional. The
 // backend should initialize any state that is required for a model
 // instance.
-TRITONSERVER_Error*
+TRITONBACKEND_ISPEC TRITONSERVER_Error*
 TRITONBACKEND_ModelInstanceInitialize(TRITONBACKEND_ModelInstance* instance)
 {
   const char* cname;
@@ -563,7 +563,7 @@ TRITONBACKEND_ModelInstanceInitialize(TRITONBACKEND_ModelInstance* instance)
 // Implementing TRITONBACKEND_ModelInstanceFinalize is optional unless
 // state is set using TRITONBACKEND_ModelInstanceSetState. The backend
 // must free this state and perform any other cleanup.
-TRITONSERVER_Error*
+TRITONBACKEND_ISPEC TRITONSERVER_Error*
 TRITONBACKEND_ModelInstanceFinalize(TRITONBACKEND_ModelInstance* instance)
 {
   void* vstate;
@@ -587,7 +587,7 @@ TRITONBACKEND_ModelInstanceFinalize(TRITONBACKEND_ModelInstance* instance)
 }
 
 // Implementing TRITONBACKEND_ModelInstanceExecute is required.
-TRITONSERVER_Error*
+TRITONBACKEND_ISPEC TRITONSERVER_Error*
 TRITONBACKEND_ModelInstanceExecute(
     TRITONBACKEND_ModelInstance* instance, TRITONBACKEND_Request** requests,
     const uint32_t request_count)
