@@ -31,6 +31,7 @@
 #include "triton/backend/backend_common.h"
 #include "triton/backend/backend_model.h"
 #include "triton/backend/backend_model_instance.h"
+#include "triton/core/tritonbackend.h"
 
 #ifdef TRITON_ENABLE_GPU
 #include <cuda_runtime_api.h>
