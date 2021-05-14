@@ -141,7 +141,7 @@ install(
   EXPORT
     triton-identity-backend-targets
   LIBRARY DESTINATION ${CMAKE_INSTALL_PREFIX}/backends/identity
-  ARCHIVE DESTINATION ${CMAKE_INSTALL_PREFIX}/backends/identity
+  RUNTIME DESTINATION ${CMAKE_INSTALL_PREFIX}/backends/identity
 )
 
 install(
