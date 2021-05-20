@@ -101,6 +101,7 @@ target_compile_options(
   triton-identity-backend PRIVATE
   $<$<OR:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>,$<CXX_COMPILER_ID:GNU>>:
     -Wall -Wextra -Wno-unused-parameter -Wno-type-limits -Werror>
+  $<$<CXX_COMPILER_ID:MSVC>:/Wall /D_WIN32_WINNT=0x0A00 /EHsc>
 )
 
 target_link_libraries(
@@ -112,13 +113,21 @@ target_link_libraries(
     triton-backend-utils    # from repo-backend
 )
 
-set_target_properties(
-  triton-identity-backend PROPERTIES
-  POSITION_INDEPENDENT_CODE ON
-  OUTPUT_NAME triton_identity
-  LINK_DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/libtriton_identity.ldscript
-  LINK_FLAGS "-Wl,--version-script libtriton_identity.ldscript"
-)
+if(WIN32)
+  set_target_properties(
+    triton-identity-backend PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    OUTPUT_NAME triton_identity
+  )
+else()
+  set_target_properties(
+    triton-identity-backend PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    OUTPUT_NAME triton_identity
+    LINK_DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/libtriton_identity.ldscript
+    LINK_FLAGS "-Wl,--version-script libtriton_identity.ldscript"
+  )
+endif()
 
 #
 # Install
@@ -132,7 +141,7 @@ install(
   EXPORT
     triton-identity-backend-targets
   LIBRARY DESTINATION ${CMAKE_INSTALL_PREFIX}/backends/identity
-  ARCHIVE DESTINATION ${CMAKE_INSTALL_PREFIX}/backends/identity
+  RUNTIME DESTINATION ${CMAKE_INSTALL_PREFIX}/backends/identity
 )
 
 install(
