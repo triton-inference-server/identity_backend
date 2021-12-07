@@ -628,7 +628,12 @@ TRITONBACKEND_ModelInstanceExecute(
   SET_TIMESTAMP(exec_start_ns);
 
   bool supports_batching = false;
-  RETURN_IF_ERROR(model_state->SupportsFirstDimBatching(&supports_batching));
+  // SupportsFirstDimBatching returns "Server not ready" when called
+  // during warmup, which can be ignored as warmup does not batch.
+  auto err = model_state->SupportsFirstDimBatching(&supports_batching);
+  if (err != nullptr && TRITONSERVER_ErrorCode(err) != TRITONSERVER_ERROR_UNAVAILABLE){
+    return err;
+  }
 
   // 'responses' is initialized with the response objects below and
   // if/when an error response is sent the corresponding entry in
