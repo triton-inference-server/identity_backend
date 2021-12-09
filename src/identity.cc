@@ -105,9 +105,7 @@ TRITONSERVER_Error*
 ModelState::Create(TRITONBACKEND_Model* triton_model, ModelState** state)
 {
   try {
-    // Identity backend supports optional inputs intrinsically as it executes
-    // requests at per input basis
-    *state = new ModelState(triton_model, true /* allow_optional */);
+    *state = new ModelState(triton_model);
   }
   catch (const BackendModelException& ex) {
     RETURN_ERROR_IF_TRUE(
@@ -119,9 +117,11 @@ ModelState::Create(TRITONBACKEND_Model* triton_model, ModelState** state)
   return nullptr;  // success
 }
 
+// Identity backend supports optional inputs intrinsically as it executes
+// requests at per input basis
 ModelState::ModelState(TRITONBACKEND_Model* triton_model)
-    : BackendModel(triton_model), instance_count_(0), execute_delay_ms_(0),
-      delay_multiplier_(0)
+    : BackendModel(triton_model, true /* allow_optional */), instance_count_(0),
+      execute_delay_ms_(0), delay_multiplier_(0)
 {
 }
 
