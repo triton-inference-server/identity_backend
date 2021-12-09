@@ -106,7 +106,7 @@ ModelState::Create(TRITONBACKEND_Model* triton_model, ModelState** state)
 {
   try {
     // Identity backend supports optional inputs intrinsically as it executes
-    // at per request basis
+    // requests at per input basis
     *state = new ModelState(triton_model, true /* allow_optional */);
   }
   catch (const BackendModelException& ex) {
