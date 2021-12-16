@@ -1,5 +1,5 @@
 <!--
-# Copyright (c) 2020, NVIDIA CORPORATION. All rights reserved.
+# Copyright 2020-2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -30,11 +30,17 @@
 
 # Triton Inference Server Identity Backend
 
-An example Triton backend that demonstrates most of the Triton Backend
-API. You can learn more about backends in the [backend
-repo](https://github.com/triton-inference-server/backend). Ask
-questions or report problems in the main Triton [issues
+A simple Triton backend that copies input tensors to corresponding
+output tensors. This backend is used primarily for testing. To learn
+more about writing your own Triton backend including simple examples,
+see the documentation included in the [backend
+repo](https://github.com/triton-inference-server/backend).
+
+Ask questions or report problems with the Identity backend in the main
+Triton [issues
 page](https://github.com/triton-inference-server/server/issues).
+
+## Build
 
 Use cmake to build and install in a local directory.
 
@@ -52,3 +58,15 @@ but the listed CMake argument can be used to override.
 * triton-inference-server/backend: -DTRITON_BACKEND_REPO_TAG=[tag]
 * triton-inference-server/core: -DTRITON_CORE_REPO_TAG=[tag]
 * triton-inference-server/common: -DTRITON_COMMON_REPO_TAG=[tag]
+
+If you are building on a release branch (or on a development branch
+that is based off of a release branch), then you must set these cmake
+arguments to point to that release branch as well. For example, if you
+are building the r21.10 identity_backend branch then you need to use
+the following additional cmake flags:
+
+```
+-DTRITON_BACKEND_REPO_TAG=r21.10
+-DTRITON_CORE_REPO_TAG=r21.10
+-DTRITON_COMMON_REPO_TAG=r21.10
+```
