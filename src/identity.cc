@@ -206,6 +206,10 @@ ModelState::ValidateModelConfig()
     RETURN_IF_ERROR(input.MemberAsString("data_type", &input_dtype));
     RETURN_IF_ERROR(output.MemberAsString("data_type", &output_dtype));
 
+    // TODO: Track counts of each input type to backend / model
+    // MetricFamily -> TypeCount
+    // Metrics -> Labels for each type name
+
     // Input and output must have same shape or reshaped shape
     std::vector<int64_t> input_shape, output_shape;
     triton::common::TritonJson::Value reshape;
