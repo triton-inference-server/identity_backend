@@ -83,7 +83,11 @@ class ModelState : public BackendModel {
   uint64_t ExecDelay() const { return execute_delay_ms_; }
   uint64_t DelayMultiplier() const { return delay_multiplier_; }
 
-  const std::map<int, std::tuple<TRITONSERVER_DataType, std::vector<int64_t>>>& OptionalInputs() { return optional_inputs_; }
+  const std::map<int, std::tuple<TRITONSERVER_DataType, std::vector<int64_t>>>&
+  OptionalInputs()
+  {
+    return optional_inputs_;
+  }
 
   // Stores the instance count
   size_t instance_count_;
@@ -102,9 +106,11 @@ class ModelState : public BackendModel {
   int execute_delay_ms_;
   int delay_multiplier_;
 
-  // output metadata to use, if an input is marked optional and not provided
+  // Store index that the corresponding inputs can be optional. Also store
+  // the output metadata to use, if an input is marked optional and not provided
   // in inference while the output is requested
-  std::map<int, std::tuple<TRITONSERVER_DataType, std::vector<int64_t>>> optional_inputs_;
+  std::map<int, std::tuple<TRITONSERVER_DataType, std::vector<int64_t>>>
+      optional_inputs_;
 };
 
 TRITONSERVER_Error*
@@ -837,7 +843,8 @@ TRITONBACKEND_ModelInstanceExecute(
           continue;
         }
       } else {
-        const auto it = model_state->OptionalInputs().find(std::stoi(index_str));
+        const auto it =
+            model_state->OptionalInputs().find(std::stoi(index_str));
         if (it != model_state->OptionalInputs().end()) {
           // If the input is optional but the corresponding output is requested,
           // return zero tensor
@@ -856,12 +863,12 @@ TRITONBACKEND_ModelInstanceExecute(
             LOG_MESSAGE(
                 TRITONSERVER_LOG_ERROR,
                 (std::string("request ") + std::to_string(r) +
-                ": failed to create response output, error response sent")
+                 ": failed to create response output, error response sent")
                     .c_str());
             continue;
           }
 
-          // Step 2. Get the output buffer.
+          // Get the output buffer.
           void* output_buffer;
           const auto byte_size = GetByteSize(dtype, shape);
           TRITONSERVER_MemoryType output_memory_type = TRITONSERVER_MEMORY_CPU;
@@ -876,7 +883,7 @@ TRITONBACKEND_ModelInstanceExecute(
             LOG_MESSAGE(
                 TRITONSERVER_LOG_ERROR,
                 (std::string("request ") + std::to_string(r) +
-                ": failed to create output buffer, error response sent")
+                 ": failed to create output buffer, error response sent")
                     .c_str());
             continue;
           }
@@ -888,6 +895,7 @@ TRITONBACKEND_ModelInstanceExecute(
                     "failed to create CPU output buffer"));
             continue;
           }
+          // Set zero data
           memset(output_buffer, 0, byte_size);
           // Done with the output, continue to the next
           continue;
@@ -900,7 +908,8 @@ TRITONBACKEND_ModelInstanceExecute(
           LOG_MESSAGE(
               TRITONSERVER_LOG_ERROR,
               (std::string("request ") + std::to_string(r) +
-              ": failed to get input '" + input_name + "', error response sent")
+               ": failed to get input '" + input_name +
+               "', error response sent")
                   .c_str());
           continue;
         }
