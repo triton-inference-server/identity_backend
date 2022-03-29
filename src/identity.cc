@@ -1,4 +1,4 @@
-// Copyright (c) 2020-2021, NVIDIA CORPORATION. All rights reserved.
+// Copyright 2020-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -83,6 +83,12 @@ class ModelState : public BackendModel {
   uint64_t ExecDelay() const { return execute_delay_ms_; }
   uint64_t DelayMultiplier() const { return delay_multiplier_; }
 
+  const std::map<int, std::tuple<TRITONSERVER_DataType, std::vector<int64_t>>>&
+  OptionalInputs()
+  {
+    return optional_inputs_;
+  }
+
   // Stores the instance count
   size_t instance_count_;
 
@@ -99,6 +105,12 @@ class ModelState : public BackendModel {
   // Delay time and multiplier to introduce into execution, in milliseconds.
   int execute_delay_ms_;
   int delay_multiplier_;
+
+  // Store index that the corresponding inputs can be optional. Also store
+  // the output metadata to use, if an input is marked optional and not provided
+  // in inference while the output is requested
+  std::map<int, std::tuple<TRITONSERVER_DataType, std::vector<int64_t>>>
+      optional_inputs_;
 };
 
 TRITONSERVER_Error*
@@ -193,6 +205,9 @@ ModelState::ValidateModelConfig()
         std::string(
             "expected input name to follow INPUT<index> pattern, got '") +
             input_name + "'");
+    // Check if input is optional
+    bool optional = false;
+    RETURN_IF_ERROR(input.MemberAsBool("optional", &optional));
 
     std::string output_name_str = std::string(output_name);
     RETURN_ERROR_IF_FALSE(
@@ -227,6 +242,18 @@ ModelState::ValidateModelConfig()
     output_infos.insert(std::make_pair(
         output_name_str.substr(strlen("OUTPUT")),
         std::make_tuple(output_dtype, output_shape)));
+
+    if (optional) {
+      const int idx = std::stoi(std::string(input_name, 5, -1));
+      const auto dtype = ModelConfigDataTypeToTritonServerDataType(input_dtype);
+      auto shape = input_shape;
+      for (auto& dim : shape) {
+        if (dim == -1) {
+          dim = 1;
+        }
+      }
+      optional_inputs_[idx] = std::make_tuple(dtype, shape);
+    }
   }
 
   // Must validate name, shape and datatype with corresponding input
@@ -738,6 +765,7 @@ TRITONBACKEND_ModelInstanceExecute(
     // necessarily batch-size 1. If the model does support batching then the
     // first dimension of the shape is the batch size. We only the first input
     // for this.
+    int64_t batch_dim = 0;
     if (supports_batching) {
       TRITONBACKEND_Input* input = nullptr;
       GUARDED_RESPOND_IF_ERROR(
@@ -770,6 +798,7 @@ TRITONBACKEND_ModelInstanceExecute(
 
       if (input_dims_count > 0) {
         total_batch_size += input_shape[0];
+        batch_dim = input_shape[0];
       } else {
         total_batch_size++;
       }
@@ -814,17 +843,76 @@ TRITONBACKEND_ModelInstanceExecute(
           continue;
         }
       } else {
-        GUARDED_RESPOND_IF_ERROR(
-            responses, r,
-            TRITONSERVER_ErrorNew(
-                TRITONSERVER_ERROR_UNSUPPORTED,
-                ("failed to get input '" + input_name + "'").c_str()));
-        LOG_MESSAGE(
-            TRITONSERVER_LOG_ERROR,
-            (std::string("request ") + std::to_string(r) +
-             ": failed to get input '" + input_name + "', error response sent")
-                .c_str());
-        continue;
+        const auto it =
+            model_state->OptionalInputs().find(std::stoi(index_str));
+        if (it != model_state->OptionalInputs().end()) {
+          // If the input is optional but the corresponding output is requested,
+          // return zero tensor
+          TRITONBACKEND_Output* output;
+          const auto& dtype = std::get<0>(it->second);
+          auto shape = std::get<1>(it->second);
+          if (batch_dim != 0) {
+            shape.insert(shape.begin(), batch_dim);
+          }
+          GUARDED_RESPOND_IF_ERROR(
+              responses, r,
+              TRITONBACKEND_ResponseOutput(
+                  responses[r], &output, output_name, dtype, shape.data(),
+                  shape.size()));
+          if (responses[r] == nullptr) {
+            LOG_MESSAGE(
+                TRITONSERVER_LOG_ERROR,
+                (std::string("request ") + std::to_string(r) +
+                 ": failed to create response output, error response sent")
+                    .c_str());
+            continue;
+          }
+
+          // Get the output buffer.
+          void* output_buffer;
+          const auto byte_size = GetByteSize(dtype, shape);
+          TRITONSERVER_MemoryType output_memory_type = TRITONSERVER_MEMORY_CPU;
+          int64_t output_memory_type_id = 0;
+          GUARDED_RESPOND_IF_ERROR(
+              responses, r,
+              TRITONBACKEND_OutputBuffer(
+                  output, &output_buffer, byte_size, &output_memory_type,
+                  &output_memory_type_id));
+
+          if (responses[r] == nullptr) {
+            LOG_MESSAGE(
+                TRITONSERVER_LOG_ERROR,
+                (std::string("request ") + std::to_string(r) +
+                 ": failed to create output buffer, error response sent")
+                    .c_str());
+            continue;
+          }
+          if (output_memory_type == TRITONSERVER_MEMORY_GPU) {
+            GUARDED_RESPOND_IF_ERROR(
+                responses, r,
+                TRITONSERVER_ErrorNew(
+                    TRITONSERVER_ERROR_UNSUPPORTED,
+                    "failed to create CPU output buffer"));
+            continue;
+          }
+          // Set zero data
+          memset(output_buffer, 0, byte_size);
+          // Done with the output, continue to the next
+          continue;
+        } else {
+          GUARDED_RESPOND_IF_ERROR(
+              responses, r,
+              TRITONSERVER_ErrorNew(
+                  TRITONSERVER_ERROR_UNSUPPORTED,
+                  ("failed to get input '" + input_name + "'").c_str()));
+          LOG_MESSAGE(
+              TRITONSERVER_LOG_ERROR,
+              (std::string("request ") + std::to_string(r) +
+               ": failed to get input '" + input_name +
+               "', error response sent")
+                  .c_str());
+          continue;
+        }
       }
 
       TRITONSERVER_DataType input_datatype;
