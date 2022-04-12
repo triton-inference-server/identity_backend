@@ -99,6 +99,10 @@ class ModelState : public BackendModel {
   // This function is used for testing.
   TRITONSERVER_Error* CreationDelay();
 
+  // Setup metrics for this backend. This function is used for testing.
+  TRITONSERVER_Error* InitMetrics(std::string model_name, uint64_t model_version);
+  TRITONSERVER_Error* UpdateMetrics(std::string input_dtype);
+
  private:
   ModelState(TRITONBACKEND_Model* triton_model);
 
@@ -111,6 +115,13 @@ class ModelState : public BackendModel {
   // in inference while the output is requested
   std::map<int, std::tuple<TRITONSERVER_DataType, std::vector<int64_t>>>
       optional_inputs_;
+
+  // Custom metrics associated with this model 
+  std::string name_ = "";
+  uint64_t version_ = 0;
+  const std::string family_name_ = "input_dtype_counter_";
+  std::map<std::string, TRITONSERVER_MetricFamily*> model_metric_families_;
+  std::map<std::string, TRITONSERVER_Metric*> model_metrics_;
 };
 
 TRITONSERVER_Error*
@@ -135,6 +146,57 @@ ModelState::ModelState(TRITONBACKEND_Model* triton_model)
     : BackendModel(triton_model, true /* allow_optional */), instance_count_(0),
       execute_delay_ms_(0), delay_multiplier_(0)
 {
+}
+
+TRITONSERVER_Error*
+ModelState::InitMetrics(std::string model_name, uint64_t model_version)
+{
+  // Store model name/version to lookup metric family in UpdateMetrics
+  name_ = model_name;
+  version_ = model_version;
+  
+  const auto family_name = family_name_ + name_ + std::to_string(version_);
+  const char* description = "Counts the number of inputs of each type seen per model";
+  // Create metric family
+  TRITONSERVER_MetricFamily* family;
+  TRITONSERVER_MetricKind kind = TRITONSERVER_METRIC_KIND_COUNTER;
+  RETURN_IF_ERROR(
+      TRITONSERVER_MetricFamilyNew(&family, kind, family_name.c_str(), description)
+  );
+  // Keep family pointers alive
+  model_metric_families_.emplace(family_name, family);
+  return nullptr;
+}
+
+TRITONSERVER_Error*
+ModelState::UpdateMetrics(std::string input_dtype)
+{
+  // Haven't seen this type yet, create a metric for it and set count to 1
+  if (model_metrics_.find(input_dtype) == model_metrics_.end()) {
+      const auto family_name = family_name_ + name_ + std::to_string(version_);
+      const auto family_it = model_metric_families_.find(family_name);
+      if (family_it == model_metric_families_.end()) {
+        return TRITONSERVER_ErrorNew(
+          TRITONSERVER_ERROR_INTERNAL,
+          "No metric family found for this model");
+      }
+
+      // Create metric
+      TRITONSERVER_Metric* metric;
+      // Placeholder for labels, don't actually need any labels for this metric
+      std::vector<const TRITONSERVER_Parameter*> labels;
+      RETURN_IF_ERROR(
+          TRITONSERVER_MetricNew(&metric, family_it->second, labels.data(), labels.size())
+      );
+      model_metrics_.emplace(input_dtype, metric);
+      TRITONSERVER_MetricIncrement(metric, 1);
+  } 
+  // Increment existing counter for this type
+  else {
+      TRITONSERVER_MetricIncrement(model_metrics_.at(input_dtype), 1);
+  }
+
+  return nullptr;
 }
 
 TRITONSERVER_Error*
@@ -220,10 +282,6 @@ ModelState::ValidateModelConfig()
     std::string input_dtype, output_dtype;
     RETURN_IF_ERROR(input.MemberAsString("data_type", &input_dtype));
     RETURN_IF_ERROR(output.MemberAsString("data_type", &output_dtype));
-
-    // TODO: Track counts of each input type to backend / model
-    // MetricFamily -> TypeCount
-    // Metrics -> Labels for each type name
 
     // Input and output must have same shape or reshaped shape
     std::vector<int64_t> input_shape, output_shape;
@@ -514,6 +572,9 @@ TRITONBACKEND_ModelInitialize(TRITONBACKEND_Model* model)
 
   // For testing.. Block the thread for certain time period before returning.
   RETURN_IF_ERROR(model_state->CreationDelay());
+
+  // For testing.. Create custom metric family
+  RETURN_IF_ERROR(model_state->InitMetrics(name, version));
 
   return nullptr;  // success
 }
@@ -950,6 +1011,9 @@ TRITONBACKEND_ModelInstanceExecute(
       LOG_MESSAGE(
           TRITONSERVER_LOG_VERBOSE,
           (std::string("\trequested_output ") + output_name).c_str());
+
+      // Update custom metrics tracking counts of each input type seen per model
+      model_state->UpdateMetrics(TRITONSERVER_DataTypeString(input_datatype));
 
       // This backend simply copies the output tensors from the corresponding
       // input tensors. The input tensors contents are available in one or more
