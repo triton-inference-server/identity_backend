@@ -77,7 +77,7 @@ class ModelState : public BackendModel {
  public:
   static TRITONSERVER_Error* Create(
       TRITONBACKEND_Model* triton_model, ModelState** state);
-  virtual ~ModelState() = default;
+  ~ModelState();
 
   // Get execution delay and delay multiplier
   uint64_t ExecDelay() const { return execute_delay_ms_; }
@@ -99,10 +99,15 @@ class ModelState : public BackendModel {
   // This function is used for testing.
   TRITONSERVER_Error* CreationDelay();
 
+#ifdef TRITON_ENABLE_METRICS
   // Setup metrics for this backend. This function is used for testing.
   TRITONSERVER_Error* InitMetrics(
       std::string model_name, uint64_t model_version);
+  // Update metrics for this backend. This function is used for testing.
   TRITONSERVER_Error* UpdateMetrics(std::string input_dtype);
+  // Delete metrics for this backend. This function is used for testing.
+  void DeleteMetrics();
+#endif  // TRITON_ENABLE_METRICS
 
  private:
   ModelState(TRITONBACKEND_Model* triton_model);
@@ -117,12 +122,11 @@ class ModelState : public BackendModel {
   std::map<int, std::tuple<TRITONSERVER_DataType, std::vector<int64_t>>>
       optional_inputs_;
 
+#ifdef TRITON_ENABLE_METRICS
   // Custom metrics associated with this model
-  std::string name_ = "";
-  uint64_t version_ = 0;
-  const std::string family_name_ = "input_dtype_counter_";
-  std::map<std::string, TRITONSERVER_MetricFamily*> model_metric_families_;
+  TRITONSERVER_MetricFamily* metric_family_;
   std::map<std::string, TRITONSERVER_Metric*> model_metrics_;
+#endif  // TRITON_ENABLE_METRICS
 };
 
 TRITONSERVER_Error*
@@ -149,23 +153,25 @@ ModelState::ModelState(TRITONBACKEND_Model* triton_model)
 {
 }
 
+ModelState::~ModelState()
+{
+#ifdef TRITON_ENABLE_METRICS
+  DeleteMetrics();
+#endif  // TRITON_ENABLE_METRICS
+}
+
+#ifdef TRITON_ENABLE_METRICS
 TRITONSERVER_Error*
 ModelState::InitMetrics(std::string model_name, uint64_t model_version)
 {
-  // Store model name/version to lookup metric family in UpdateMetrics
-  name_ = model_name;
-  version_ = model_version;
-
-  const auto family_name = family_name_ + name_ + std::to_string(version_);
+  // Create metric family
+  const auto family_name = std::string("input_dtype_counter_") + model_name +
+                           std::to_string(model_version);
   const char* description =
       "Counts the number of inputs of each type seen per model";
-  // Create metric family
-  TRITONSERVER_MetricFamily* family;
   TRITONSERVER_MetricKind kind = TRITONSERVER_METRIC_KIND_COUNTER;
   RETURN_IF_ERROR(TRITONSERVER_MetricFamilyNew(
-      &family, kind, family_name.c_str(), description));
-  // Keep family pointers alive
-  model_metric_families_.emplace(family_name, family);
+      &metric_family_, kind, family_name.c_str(), description));
   return nullptr;
 }
 
@@ -174,19 +180,11 @@ ModelState::UpdateMetrics(std::string input_dtype)
 {
   // Haven't seen this type yet, create a metric for it and set count to 1
   if (model_metrics_.find(input_dtype) == model_metrics_.end()) {
-    const auto family_name = family_name_ + name_ + std::to_string(version_);
-    const auto family_it = model_metric_families_.find(family_name);
-    if (family_it == model_metric_families_.end()) {
-      return TRITONSERVER_ErrorNew(
-          TRITONSERVER_ERROR_INTERNAL, "No metric family found for this model");
-    }
-
-    // Create metric
     TRITONSERVER_Metric* metric;
     // Placeholder for labels, don't actually need any labels for this metric
     std::vector<const TRITONSERVER_Parameter*> labels;
     RETURN_IF_ERROR(TRITONSERVER_MetricNew(
-        &metric, family_it->second, labels.data(), labels.size()));
+        &metric, metric_family_, labels.data(), labels.size()));
     model_metrics_.emplace(input_dtype, metric);
     TRITONSERVER_MetricIncrement(metric, 1);
   }
@@ -197,6 +195,17 @@ ModelState::UpdateMetrics(std::string input_dtype)
 
   return nullptr;
 }
+
+void
+ModelState::DeleteMetrics()
+{
+  for (const auto& metric_it : model_metrics_) {
+    TRITONSERVER_MetricDelete(metric_it.second);
+  }
+
+  TRITONSERVER_MetricFamilyDelete(metric_family_);
+}
+#endif  // TRITON_ENABLE_METRICS
 
 TRITONSERVER_Error*
 ModelState::CreationDelay()
@@ -572,8 +581,10 @@ TRITONBACKEND_ModelInitialize(TRITONBACKEND_Model* model)
   // For testing.. Block the thread for certain time period before returning.
   RETURN_IF_ERROR(model_state->CreationDelay());
 
+#ifdef TRITON_ENABLE_METRICS
   // For testing.. Create custom metric family
   RETURN_IF_ERROR(model_state->InitMetrics(name, version));
+#endif  // TRITON_ENABLE_METRICS
 
   return nullptr;  // success
 }
@@ -1011,8 +1022,10 @@ TRITONBACKEND_ModelInstanceExecute(
           TRITONSERVER_LOG_VERBOSE,
           (std::string("\trequested_output ") + output_name).c_str());
 
+#ifdef TRITON_ENABLE_METRICS
       // Update custom metrics tracking counts of each input type seen per model
       model_state->UpdateMetrics(TRITONSERVER_DataTypeString(input_datatype));
+#endif  // TRITON_ENABLE_METRICS
 
       // This backend simply copies the output tensors from the corresponding
       // input tensors. The input tensors contents are available in one or more
