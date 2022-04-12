@@ -100,7 +100,8 @@ class ModelState : public BackendModel {
   TRITONSERVER_Error* CreationDelay();
 
   // Setup metrics for this backend. This function is used for testing.
-  TRITONSERVER_Error* InitMetrics(std::string model_name, uint64_t model_version);
+  TRITONSERVER_Error* InitMetrics(
+      std::string model_name, uint64_t model_version);
   TRITONSERVER_Error* UpdateMetrics(std::string input_dtype);
 
  private:
@@ -116,7 +117,7 @@ class ModelState : public BackendModel {
   std::map<int, std::tuple<TRITONSERVER_DataType, std::vector<int64_t>>>
       optional_inputs_;
 
-  // Custom metrics associated with this model 
+  // Custom metrics associated with this model
   std::string name_ = "";
   uint64_t version_ = 0;
   const std::string family_name_ = "input_dtype_counter_";
@@ -154,15 +155,15 @@ ModelState::InitMetrics(std::string model_name, uint64_t model_version)
   // Store model name/version to lookup metric family in UpdateMetrics
   name_ = model_name;
   version_ = model_version;
-  
+
   const auto family_name = family_name_ + name_ + std::to_string(version_);
-  const char* description = "Counts the number of inputs of each type seen per model";
+  const char* description =
+      "Counts the number of inputs of each type seen per model";
   // Create metric family
   TRITONSERVER_MetricFamily* family;
   TRITONSERVER_MetricKind kind = TRITONSERVER_METRIC_KIND_COUNTER;
-  RETURN_IF_ERROR(
-      TRITONSERVER_MetricFamilyNew(&family, kind, family_name.c_str(), description)
-  );
+  RETURN_IF_ERROR(TRITONSERVER_MetricFamilyNew(
+      &family, kind, family_name.c_str(), description));
   // Keep family pointers alive
   model_metric_families_.emplace(family_name, family);
   return nullptr;
@@ -173,27 +174,25 @@ ModelState::UpdateMetrics(std::string input_dtype)
 {
   // Haven't seen this type yet, create a metric for it and set count to 1
   if (model_metrics_.find(input_dtype) == model_metrics_.end()) {
-      const auto family_name = family_name_ + name_ + std::to_string(version_);
-      const auto family_it = model_metric_families_.find(family_name);
-      if (family_it == model_metric_families_.end()) {
-        return TRITONSERVER_ErrorNew(
-          TRITONSERVER_ERROR_INTERNAL,
-          "No metric family found for this model");
-      }
+    const auto family_name = family_name_ + name_ + std::to_string(version_);
+    const auto family_it = model_metric_families_.find(family_name);
+    if (family_it == model_metric_families_.end()) {
+      return TRITONSERVER_ErrorNew(
+          TRITONSERVER_ERROR_INTERNAL, "No metric family found for this model");
+    }
 
-      // Create metric
-      TRITONSERVER_Metric* metric;
-      // Placeholder for labels, don't actually need any labels for this metric
-      std::vector<const TRITONSERVER_Parameter*> labels;
-      RETURN_IF_ERROR(
-          TRITONSERVER_MetricNew(&metric, family_it->second, labels.data(), labels.size())
-      );
-      model_metrics_.emplace(input_dtype, metric);
-      TRITONSERVER_MetricIncrement(metric, 1);
-  } 
+    // Create metric
+    TRITONSERVER_Metric* metric;
+    // Placeholder for labels, don't actually need any labels for this metric
+    std::vector<const TRITONSERVER_Parameter*> labels;
+    RETURN_IF_ERROR(TRITONSERVER_MetricNew(
+        &metric, family_it->second, labels.data(), labels.size()));
+    model_metrics_.emplace(input_dtype, metric);
+    TRITONSERVER_MetricIncrement(metric, 1);
+  }
   // Increment existing counter for this type
   else {
-      TRITONSERVER_MetricIncrement(model_metrics_.at(input_dtype), 1);
+    TRITONSERVER_MetricIncrement(model_metrics_.at(input_dtype), 1);
   }
 
   return nullptr;
