@@ -37,6 +37,9 @@
 #include <cuda_runtime_api.h>
 #endif  // TRITON_ENABLE_GPU
 
+// TODO
+#define TRITON_ENABLE_METRICS 1
+
 namespace triton { namespace backend { namespace identity {
 
 //
@@ -104,7 +107,7 @@ class ModelState : public BackendModel {
   TRITONSERVER_Error* InitMetrics(
       std::string model_name, uint64_t model_version);
   // Update metrics for this backend. This function is used for testing.
-  TRITONSERVER_Error* UpdateMetrics(std::string input_dtype);
+  TRITONSERVER_Error* UpdateMetrics(uint64_t input_byte_size);
   // Delete metrics for this backend. This function is used for testing.
   void DeleteMetrics();
 #endif  // TRITON_ENABLE_METRICS
@@ -125,7 +128,7 @@ class ModelState : public BackendModel {
 #ifdef TRITON_ENABLE_METRICS
   // Custom metrics associated with this model
   TRITONSERVER_MetricFamily* metric_family_;
-  std::map<std::string, TRITONSERVER_Metric*> model_metrics_;
+  TRITONSERVER_Metric* input_byte_size_counter_;
 #endif  // TRITON_ENABLE_METRICS
 };
 
@@ -164,45 +167,42 @@ ModelState::~ModelState()
 TRITONSERVER_Error*
 ModelState::InitMetrics(std::string model_name, uint64_t model_version)
 {
+  // TODO
+  LOG_MESSAGE(TRITONSERVER_LOG_INFO, "InitMetrics called");
+
   // Create metric family
-  const auto family_name = std::string("input_dtype_counter_") + model_name +
-                           std::to_string(model_version);
+  const auto family_name = std::string("input_byte_size_counter_") + model_name +
+                           std::string("_v") + std::to_string(model_version);
   const char* description =
-      "Counts the number of inputs of each type seen per model";
+      "Counts the sum total input_byte_size across all requests per model";
   TRITONSERVER_MetricKind kind = TRITONSERVER_METRIC_KIND_COUNTER;
   RETURN_IF_ERROR(TRITONSERVER_MetricFamilyNew(
       &metric_family_, kind, family_name.c_str(), description));
+
+  // Placeholder for labels, don't actually need any labels for this metric
+  std::vector<const TRITONSERVER_Parameter*> labels;
+  RETURN_IF_ERROR(TRITONSERVER_MetricNew(
+      &input_byte_size_counter_, metric_family_, labels.data(), labels.size()));
   return nullptr;
 }
 
 TRITONSERVER_Error*
-ModelState::UpdateMetrics(std::string input_dtype)
+ModelState::UpdateMetrics(uint64_t input_byte_size)
 {
-  // Haven't seen this type yet, create a metric for it and set count to 1
-  if (model_metrics_.find(input_dtype) == model_metrics_.end()) {
-    TRITONSERVER_Metric* metric;
-    // Placeholder for labels, don't actually need any labels for this metric
-    std::vector<const TRITONSERVER_Parameter*> labels;
-    RETURN_IF_ERROR(TRITONSERVER_MetricNew(
-        &metric, metric_family_, labels.data(), labels.size()));
-    model_metrics_.emplace(input_dtype, metric);
-    TRITONSERVER_MetricIncrement(metric, 1);
-  }
-  // Increment existing counter for this type
-  else {
-    TRITONSERVER_MetricIncrement(model_metrics_.at(input_dtype), 1);
-  }
+  // TODO
+  LOG_MESSAGE(TRITONSERVER_LOG_INFO, "UpdateMetrics called");
 
+  TRITONSERVER_MetricIncrement(input_byte_size_counter_, input_byte_size);
   return nullptr;
 }
 
 void
 ModelState::DeleteMetrics()
 {
-  for (const auto& metric_it : model_metrics_) {
-    TRITONSERVER_MetricDelete(metric_it.second);
-  }
+  // TODO
+  LOG_MESSAGE(TRITONSERVER_LOG_INFO, "DeleteMetrics called");
 
+  TRITONSERVER_MetricDelete(input_byte_size_counter_);
   TRITONSERVER_MetricFamilyDelete(metric_family_);
 }
 #endif  // TRITON_ENABLE_METRICS
@@ -581,10 +581,19 @@ TRITONBACKEND_ModelInitialize(TRITONBACKEND_Model* model)
   // For testing.. Block the thread for certain time period before returning.
   RETURN_IF_ERROR(model_state->CreationDelay());
 
+  // TODO
+  LOG_MESSAGE(TRITONSERVER_LOG_INFO, "Before call InitMetrics");
+
 #ifdef TRITON_ENABLE_METRICS
+  // TODO
+  LOG_MESSAGE(TRITONSERVER_LOG_INFO, "Inside IFDEF before call InitMetrics");
+
   // For testing.. Create custom metric family
   RETURN_IF_ERROR(model_state->InitMetrics(name, version));
 #endif  // TRITON_ENABLE_METRICS
+
+  // TODO
+  LOG_MESSAGE(TRITONSERVER_LOG_INFO, "After call InitMetrics");
 
   return nullptr;  // success
 }
@@ -1024,7 +1033,7 @@ TRITONBACKEND_ModelInstanceExecute(
 
 #ifdef TRITON_ENABLE_METRICS
       // Update custom metrics tracking counts of each input type seen per model
-      model_state->UpdateMetrics(TRITONSERVER_DataTypeString(input_datatype));
+      model_state->UpdateMetrics(input_byte_size);
 #endif  // TRITON_ENABLE_METRICS
 
       // This backend simply copies the output tensors from the corresponding
