@@ -592,10 +592,6 @@ TRITONBACKEND_ModelInitialize(TRITONBACKEND_Model* model)
   // across backend
   RETURN_IF_ERROR(
       model_state->InitMetrics(backend_state->metric_family_, name, version));
-#else
-  // TODO: Remove
-  LOG_MESSAGE(
-      TRITONSERVER_LOG_ERROR, "TRITON_ENABLE_METRICS not defined, but it should be.");
 #endif  // TRITON_ENABLE_METRICS
 
   return nullptr;  // success

@@ -105,6 +105,13 @@ target_compile_options(
   $<$<CXX_COMPILER_ID:MSVC>:/Wall /D_WIN32_WINNT=0x0A00 /EHsc>
 )
 
+if(${TRITON_ENABLE_METRICS})
+  target_compile_definitions(
+    triton-identity-backend
+    PRIVATE TRITON_ENABLE_METRICS=1
+  )
+endif() # TRITON_ENABLE_METRICS
+
 target_link_libraries(
   triton-identity-backend
   PRIVATE
