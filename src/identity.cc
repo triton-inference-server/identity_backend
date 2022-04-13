@@ -489,7 +489,8 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
 #ifdef TRITON_ENABLE_METRICS
   // Create metric family
   const char* family_name = "input_byte_size_counter";
-  const char* desc = "Sum total input_byte_size across all identity models";
+  const char* desc =
+      "Cumulative input_byte_size across all identity model requests";
   TRITONSERVER_MetricKind kind = TRITONSERVER_METRIC_KIND_COUNTER;
   RETURN_IF_ERROR(TRITONSERVER_MetricFamilyNew(
       &state->metric_family_, kind, family_name, desc));
