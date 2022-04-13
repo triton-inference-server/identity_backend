@@ -37,9 +37,6 @@
 #include <cuda_runtime_api.h>
 #endif  // TRITON_ENABLE_GPU
 
-// TODO
-#define TRITON_ENABLE_METRICS 1
-
 namespace triton { namespace backend { namespace identity {
 
 //
