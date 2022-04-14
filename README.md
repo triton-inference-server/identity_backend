@@ -70,3 +70,22 @@ the following additional cmake flags:
 -DTRITON_CORE_REPO_TAG=r21.10
 -DTRITON_COMMON_REPO_TAG=r21.10
 ```
+
+## Custom Metric Example
+
+When `TRITON_ENABLE_METRICS` is enabled, this backend implements an example
+of registering a custom metric to Triton's existing metrics endpoint via the
+[Metrics API](https://github.com/triton-inference-server/server/blob/main/docs/metrics.md#custom-metrics).
+
+This metric will track the cumulative `input_byte_size` of all requests
+to this backend per-model. Here's an example output of the custom metric
+from Triton's metrics endpoint after a few requests to each model: 
+
+```
+# HELP input_byte_size_counter Cumulative input byte size of all requests received by the model
+# TYPE input_byte_size_counter counter
+input_byte_size_counter{model="identity_uint32",version="1"} 64.000000
+input_byte_size_counter{model="identity_fp32",version="1"} 32.000000
+```
+
+This example can be referenced to implement custom metrics for various use cases.
