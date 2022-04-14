@@ -69,12 +69,26 @@ namespace triton { namespace backend { namespace identity {
 
 // Custom object to store global state for this backend
 struct IdentityBackendState {
-  TRITONSERVER_MetricFamily* metric_family_;
+  TRITONSERVER_MetricFamily* metric_family_ = nullptr;
   std::string message_ = "backend state";
+
+  explicit IdentityBackendState()
+  {
+#ifdef TRITON_ENABLE_METRICS
+    // Create metric family
+    THROW_IF_BACKEND_MODEL_ERROR(TRITONSERVER_MetricFamilyNew(
+        &metric_family_, TRITONSERVER_METRIC_KIND_COUNTER,
+        "input_byte_size_counter",
+        "Cumulative input byte size of all requests received by the model"));
+#endif  // TRITON_ENABLE_METRICS
+  }
+
   ~IdentityBackendState()
   {
 #ifdef TRITON_ENABLE_METRICS
-    TRITONSERVER_MetricFamilyDelete(metric_family_);
+    if (metric_family_ != nullptr) {
+        TRITONSERVER_MetricFamilyDelete(metric_family_);
+    }
 #endif  // TRITON_ENABLE_METRICS
   }
 };
@@ -112,11 +126,11 @@ class ModelState : public BackendModel {
   TRITONSERVER_Error* CreationDelay();
 
 #ifdef TRITON_ENABLE_METRICS
-  // Setup metrics for this backend. This function is used for testing.
+  // Setup metrics for this backend.
   TRITONSERVER_Error* InitMetrics(
       TRITONSERVER_MetricFamily* family, std::string model_name,
       uint64_t model_version);
-  // Update metrics for this backend. This function is used for testing.
+  // Update metrics for this backend.
   TRITONSERVER_Error* UpdateMetrics(uint64_t input_byte_size);
 #endif  // TRITON_ENABLE_METRICS
 
@@ -485,17 +499,6 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
   // make use of the global backend state here to track a custom metric across
   // all models using this backend if metrics are enabled.
   IdentityBackendState* state = new IdentityBackendState();
-
-#ifdef TRITON_ENABLE_METRICS
-  // Create metric family
-  const char* family_name = "input_byte_size_counter";
-  const char* desc =
-      "Cumulative input_byte_size across all identity model requests";
-  TRITONSERVER_MetricKind kind = TRITONSERVER_METRIC_KIND_COUNTER;
-  RETURN_IF_ERROR(TRITONSERVER_MetricFamilyNew(
-      &state->metric_family_, kind, family_name, desc));
-#endif  // TRITON_ENABLE_METRICS
-
   RETURN_IF_ERROR(
       TRITONBACKEND_BackendSetState(backend, reinterpret_cast<void*>(state)));
 
@@ -588,8 +591,7 @@ TRITONBACKEND_ModelInitialize(TRITONBACKEND_Model* model)
   RETURN_IF_ERROR(model_state->CreationDelay());
 
 #ifdef TRITON_ENABLE_METRICS
-  // For testing.. Create custom metric per model with metric family shared
-  // across backend
+  // Create custom metric per model with metric family shared across backend
   RETURN_IF_ERROR(
       model_state->InitMetrics(backend_state->metric_family_, name, version));
 #endif  // TRITON_ENABLE_METRICS
