@@ -67,6 +67,32 @@ namespace triton { namespace backend { namespace identity {
     }                                                                   \
   } while (false)
 
+// Custom object to store global state for this backend
+struct IdentityBackendState {
+  TRITONSERVER_MetricFamily* metric_family_ = nullptr;
+  std::string message_ = "backend state";
+
+  explicit IdentityBackendState()
+  {
+#ifdef TRITON_ENABLE_METRICS
+    // Create metric family
+    THROW_IF_BACKEND_MODEL_ERROR(TRITONSERVER_MetricFamilyNew(
+        &metric_family_, TRITONSERVER_METRIC_KIND_COUNTER,
+        "input_byte_size_counter",
+        "Cumulative input byte size of all requests received by the model"));
+#endif  // TRITON_ENABLE_METRICS
+  }
+
+  ~IdentityBackendState()
+  {
+#ifdef TRITON_ENABLE_METRICS
+    if (metric_family_ != nullptr) {
+      TRITONSERVER_MetricFamilyDelete(metric_family_);
+    }
+#endif  // TRITON_ENABLE_METRICS
+  }
+};
+
 //
 // ModelState
 //
@@ -77,7 +103,7 @@ class ModelState : public BackendModel {
  public:
   static TRITONSERVER_Error* Create(
       TRITONBACKEND_Model* triton_model, ModelState** state);
-  virtual ~ModelState() = default;
+  ~ModelState();
 
   // Get execution delay and delay multiplier
   uint64_t ExecDelay() const { return execute_delay_ms_; }
@@ -99,6 +125,15 @@ class ModelState : public BackendModel {
   // This function is used for testing.
   TRITONSERVER_Error* CreationDelay();
 
+#ifdef TRITON_ENABLE_METRICS
+  // Setup metrics for this backend.
+  TRITONSERVER_Error* InitMetrics(
+      TRITONSERVER_MetricFamily* family, std::string model_name,
+      uint64_t model_version);
+  // Update metrics for this backend.
+  TRITONSERVER_Error* UpdateMetrics(uint64_t input_byte_size);
+#endif  // TRITON_ENABLE_METRICS
+
  private:
   ModelState(TRITONBACKEND_Model* triton_model);
 
@@ -111,6 +146,11 @@ class ModelState : public BackendModel {
   // in inference while the output is requested
   std::map<int, std::tuple<TRITONSERVER_DataType, std::vector<int64_t>>>
       optional_inputs_;
+
+#ifdef TRITON_ENABLE_METRICS
+  // Custom metrics associated with this model
+  TRITONSERVER_Metric* input_byte_size_counter_ = nullptr;
+#endif  // TRITON_ENABLE_METRICS
 };
 
 TRITONSERVER_Error*
@@ -136,6 +176,42 @@ ModelState::ModelState(TRITONBACKEND_Model* triton_model)
       execute_delay_ms_(0), delay_multiplier_(0)
 {
 }
+
+ModelState::~ModelState()
+{
+#ifdef TRITON_ENABLE_METRICS
+  if (input_byte_size_counter_ != nullptr) {
+    TRITONSERVER_MetricDelete(input_byte_size_counter_);
+  }
+#endif  // TRITON_ENABLE_METRICS
+}
+
+#ifdef TRITON_ENABLE_METRICS
+TRITONSERVER_Error*
+ModelState::InitMetrics(
+    TRITONSERVER_MetricFamily* family, std::string model_name,
+    uint64_t model_version)
+{
+  // Create labels for model/version pair to breakdown backend metrics per-model
+  std::vector<const TRITONSERVER_Parameter*> labels;
+  labels.emplace_back(TRITONSERVER_ParameterNew(
+      "model", TRITONSERVER_PARAMETER_STRING, model_name.c_str()));
+  labels.emplace_back(TRITONSERVER_ParameterNew(
+      "version", TRITONSERVER_PARAMETER_STRING,
+      std::to_string(model_version).c_str()));
+  RETURN_IF_ERROR(TRITONSERVER_MetricNew(
+      &input_byte_size_counter_, family, labels.data(), labels.size()));
+  return nullptr;  // success
+}
+
+TRITONSERVER_Error*
+ModelState::UpdateMetrics(uint64_t input_byte_size)
+{
+  RETURN_IF_ERROR(
+      TRITONSERVER_MetricIncrement(input_byte_size_counter_, input_byte_size));
+  return nullptr;  // success
+}
+#endif  // TRITON_ENABLE_METRICS
 
 TRITONSERVER_Error*
 ModelState::CreationDelay()
@@ -422,9 +498,9 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
       (std::string("backend configuration:\n") + buffer).c_str());
 
   // If we have any global backend state we create and set it here. We
-  // don't need anything for this backend but for demonstration
-  // purposes we just create something...
-  std::string* state = new std::string("backend state");
+  // make use of the global backend state here to track a custom metric across
+  // all models using this backend if metrics are enabled.
+  IdentityBackendState* state = new IdentityBackendState();
   RETURN_IF_ERROR(
       TRITONBACKEND_BackendSetState(backend, reinterpret_cast<void*>(state)));
 
@@ -439,11 +515,12 @@ TRITONBACKEND_Finalize(TRITONBACKEND_Backend* backend)
 {
   void* vstate;
   RETURN_IF_ERROR(TRITONBACKEND_BackendState(backend, &vstate));
-  std::string* state = reinterpret_cast<std::string*>(vstate);
+  IdentityBackendState* state = reinterpret_cast<IdentityBackendState*>(vstate);
 
   LOG_MESSAGE(
       TRITONSERVER_LOG_INFO,
-      (std::string("TRITONBACKEND_Finalize: state is '") + *state + "'")
+      (std::string("TRITONBACKEND_Finalize: state is '") + state->message_ +
+       "'")
           .c_str());
 
   delete state;
@@ -484,17 +561,21 @@ TRITONBACKEND_ModelInitialize(TRITONBACKEND_Model* model)
       (std::string("Repository location: ") + clocation).c_str());
 
   // The model can access the backend as well... here we can access
-  // the backend global state.
+  // the backend global state. We will use it to add per-model metrics
+  // to the global metric family object stored in the state, if metrics
+  // are enabled,
   TRITONBACKEND_Backend* backend;
   RETURN_IF_ERROR(TRITONBACKEND_ModelBackend(model, &backend));
 
   void* vbackendstate;
   RETURN_IF_ERROR(TRITONBACKEND_BackendState(backend, &vbackendstate));
-  std::string* backend_state = reinterpret_cast<std::string*>(vbackendstate);
+  IdentityBackendState* backend_state =
+      reinterpret_cast<IdentityBackendState*>(vbackendstate);
 
   LOG_MESSAGE(
       TRITONSERVER_LOG_INFO,
-      (std::string("backend state is '") + *backend_state + "'").c_str());
+      (std::string("backend state is '") + backend_state->message_ + "'")
+          .c_str());
 
   // Create a ModelState object and associate it with the TRITONBACKEND_Model.
   ModelState* model_state;
@@ -510,6 +591,12 @@ TRITONBACKEND_ModelInitialize(TRITONBACKEND_Model* model)
 
   // For testing.. Block the thread for certain time period before returning.
   RETURN_IF_ERROR(model_state->CreationDelay());
+
+#ifdef TRITON_ENABLE_METRICS
+  // Create custom metric per model with metric family shared across backend
+  RETURN_IF_ERROR(
+      model_state->InitMetrics(backend_state->metric_family_, name, version));
+#endif  // TRITON_ENABLE_METRICS
 
   return nullptr;  // success
 }
@@ -946,6 +1033,11 @@ TRITONBACKEND_ModelInstanceExecute(
       LOG_MESSAGE(
           TRITONSERVER_LOG_VERBOSE,
           (std::string("\trequested_output ") + output_name).c_str());
+
+#ifdef TRITON_ENABLE_METRICS
+      GUARDED_RESPOND_IF_ERROR(
+          responses, r, model_state->UpdateMetrics(input_byte_size));
+#endif  // TRITON_ENABLE_METRICS
 
       // This backend simply copies the output tensors from the corresponding
       // input tensors. The input tensors contents are available in one or more

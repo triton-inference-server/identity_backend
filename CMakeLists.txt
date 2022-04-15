@@ -1,4 +1,4 @@
-# Copyright (c) 2020-2021, NVIDIA CORPORATION. All rights reserved.
+# Copyright 2020-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -39,6 +39,7 @@ project(tritonidentitybackend LANGUAGES C CXX)
 #
 option(TRITON_ENABLE_GPU "Enable GPU support in backend" OFF)
 option(TRITON_ENABLE_STATS "Include statistics collections in backend" ON)
+option(TRITON_ENABLE_METRICS "Include metrics support in backend" ON)
 
 set(TRITON_COMMON_REPO_TAG "main" CACHE STRING "Tag for triton-inference-server/common repo")
 set(TRITON_CORE_REPO_TAG "main" CACHE STRING "Tag for triton-inference-server/core repo")
@@ -103,6 +104,13 @@ target_compile_options(
     -Wall -Wextra -Wno-unused-parameter -Wno-type-limits -Werror>
   $<$<CXX_COMPILER_ID:MSVC>:/Wall /D_WIN32_WINNT=0x0A00 /EHsc>
 )
+
+if(${TRITON_ENABLE_METRICS})
+  target_compile_definitions(
+    triton-identity-backend
+    PRIVATE TRITON_ENABLE_METRICS=1
+  )
+endif() # TRITON_ENABLE_METRICS
 
 target_link_libraries(
   triton-identity-backend
