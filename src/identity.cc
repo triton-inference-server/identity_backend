@@ -87,7 +87,7 @@ struct IdentityBackendState {
   {
 #ifdef TRITON_ENABLE_METRICS
     if (metric_family_ != nullptr) {
-        TRITONSERVER_MetricFamilyDelete(metric_family_);
+      TRITONSERVER_MetricFamilyDelete(metric_family_);
     }
 #endif  // TRITON_ENABLE_METRICS
   }
@@ -180,7 +180,9 @@ ModelState::ModelState(TRITONBACKEND_Model* triton_model)
 ModelState::~ModelState()
 {
 #ifdef TRITON_ENABLE_METRICS
-  TRITONSERVER_MetricDelete(input_byte_size_counter_);
+  if (input_byte_size_counter_ != nullptr) {
+    TRITONSERVER_MetricDelete(input_byte_size_counter_);
+  }
 #endif  // TRITON_ENABLE_METRICS
 }
 
