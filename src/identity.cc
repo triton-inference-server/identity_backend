@@ -201,6 +201,9 @@ ModelState::InitMetrics(
       std::to_string(model_version).c_str()));
   RETURN_IF_ERROR(TRITONSERVER_MetricNew(
       &input_byte_size_counter_, family, labels.data(), labels.size()));
+  for (const auto label : labels) {
+    TRITONSERVER_ParameterDelete(const_cast<TRITONSERVER_Parameter*>(label));
+  }
   return nullptr;  // success
 }
 
@@ -500,9 +503,17 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
   // If we have any global backend state we create and set it here. We
   // make use of the global backend state here to track a custom metric across
   // all models using this backend if metrics are enabled.
-  IdentityBackendState* state = new IdentityBackendState();
-  RETURN_IF_ERROR(
-      TRITONBACKEND_BackendSetState(backend, reinterpret_cast<void*>(state)));
+  try {
+    IdentityBackendState* state = new IdentityBackendState();
+    RETURN_IF_ERROR(
+        TRITONBACKEND_BackendSetState(backend, reinterpret_cast<void*>(state)));
+  }
+  catch (const BackendModelException& ex) {
+    RETURN_ERROR_IF_TRUE(
+        ex.err_ == nullptr, TRITONSERVER_ERROR_INTERNAL,
+        std::string("unexpected nullptr in BackendModelException"));
+    RETURN_IF_ERROR(ex.err_);
+  }
 
   return nullptr;  // success
 }
