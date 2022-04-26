@@ -201,6 +201,9 @@ ModelState::InitMetrics(
       std::to_string(model_version).c_str()));
   RETURN_IF_ERROR(TRITONSERVER_MetricNew(
       &input_byte_size_counter_, family, labels.data(), labels.size()));
+  for (const auto label : labels) {
+    TRITONSERVER_ParameterDelete(const_cast<TRITONSERVER_Parameter*>(label));
+  }
   return nullptr;  // success
 }
 
