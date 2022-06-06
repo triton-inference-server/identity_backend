@@ -834,7 +834,7 @@ TRITONBACKEND_ModelInstanceExecute(
     if (responses[r] == nullptr) {
       LOG_MESSAGE(
           TRITONSERVER_LOG_ERROR,
-          (std::string("request ") + std::to_string(r) +
+          (requests[r]->IdString() +
            ": failed to read request input/output counts, error response sent")
               .c_str());
       continue;
@@ -842,7 +842,7 @@ TRITONBACKEND_ModelInstanceExecute(
 
     LOG_MESSAGE(
         TRITONSERVER_LOG_VERBOSE,
-        (std::string("request ") + std::to_string(r) + ": id = \"" +
+        (requests[r]->IdString() + ": id = \"" +
          request_id + "\", correlation_id = " + std::to_string(correlation_id) +
          ", input_count = " + std::to_string(input_count) +
          ", requested_output_count = " + std::to_string(requested_output_count))
@@ -872,7 +872,7 @@ TRITONBACKEND_ModelInstanceExecute(
       if (responses[r] == nullptr) {
         LOG_MESSAGE(
             TRITONSERVER_LOG_ERROR,
-            (std::string("request ") + std::to_string(r) +
+            (requests[r]->IdString() +
              ": failed to read input, error response sent")
                 .c_str());
         continue;
@@ -888,7 +888,7 @@ TRITONBACKEND_ModelInstanceExecute(
       if (responses[r] == nullptr) {
         LOG_MESSAGE(
             TRITONSERVER_LOG_ERROR,
-            (std::string("request ") + std::to_string(r) +
+            (requests[r]->IdString() +
              ": failed to read input properties, error response sent")
                 .c_str());
         continue;
@@ -916,7 +916,7 @@ TRITONBACKEND_ModelInstanceExecute(
       if (responses[r] == nullptr) {
         LOG_MESSAGE(
             TRITONSERVER_LOG_ERROR,
-            (std::string("request ") + std::to_string(r) +
+            (requests[r]->IdString()
              ": failed to read requested output name, error response sent")
                 .c_str());
         continue;
@@ -935,12 +935,13 @@ TRITONBACKEND_ModelInstanceExecute(
         if (responses[r] == nullptr) {
           LOG_MESSAGE(
               TRITONSERVER_LOG_ERROR,
-              (std::string("request ") + std::to_string(r) +
+              (requests[r]->IdString()
                ": failed to read input, error response sent")
                   .c_str());
           continue;
         }
       } else {
+<<<<<<< Updated upstream
         const auto it =
             model_state->OptionalInputs().find(std::stoi(index_str));
         if (it != model_state->OptionalInputs().end()) {
@@ -1011,6 +1012,19 @@ TRITONBACKEND_ModelInstanceExecute(
                   .c_str());
           continue;
         }
+=======
+        GUARDED_RESPOND_IF_ERROR(
+            responses, r,
+            TRITONSERVER_ErrorNew(
+                TRITONSERVER_ERROR_UNSUPPORTED,
+                ("failed to get input '" + input_name + "'").c_str()));
+        LOG_MESSAGE(
+            TRITONSERVER_LOG_ERROR,
+            (requests[r]->IdString()
+             ": failed to get input '" + input_name + "', error response sent")
+                .c_str());
+        continue;
+>>>>>>> Stashed changes
       }
 
       TRITONSERVER_DataType input_datatype;
@@ -1026,7 +1040,7 @@ TRITONBACKEND_ModelInstanceExecute(
       if (responses[r] == nullptr) {
         LOG_MESSAGE(
             TRITONSERVER_LOG_ERROR,
-            (std::string("request ") + std::to_string(r) +
+            (requests[r]->IdString()
              ": failed to read input properties, error response sent")
                 .c_str());
         continue;
@@ -1034,7 +1048,7 @@ TRITONBACKEND_ModelInstanceExecute(
 
       LOG_MESSAGE(
           TRITONSERVER_LOG_VERBOSE,
-          (std::string("\tinput ") + input_name + ": datatype = " +
+          (requests[r]->IdString() + "\tinput " + input_name + ": datatype = " +
            TRITONSERVER_DataTypeString(input_datatype) + ", shape = " +
            backend::ShapeToString(input_shape, input_dims_count) +
            ", byte_size = " + std::to_string(input_byte_size) +
@@ -1043,7 +1057,7 @@ TRITONBACKEND_ModelInstanceExecute(
 
       LOG_MESSAGE(
           TRITONSERVER_LOG_VERBOSE,
-          (std::string("\trequested_output ") + output_name).c_str());
+          (requests[r]->IdString() + "\trequested_output " + output_name).c_str());
 
 #ifdef TRITON_ENABLE_METRICS
       GUARDED_RESPOND_IF_ERROR(
@@ -1074,7 +1088,7 @@ TRITONBACKEND_ModelInstanceExecute(
       if (responses[r] == nullptr) {
         LOG_MESSAGE(
             TRITONSERVER_LOG_ERROR,
-            (std::string("request ") + std::to_string(r) +
+            (requests[r]->IdString()
              ": failed to create response output, error response sent")
                 .c_str());
         continue;
@@ -1098,7 +1112,7 @@ TRITONBACKEND_ModelInstanceExecute(
                 "failed to create output buffer"));
         LOG_MESSAGE(
             TRITONSERVER_LOG_ERROR,
-            (std::string("request ") + std::to_string(r) +
+            (requests[r]->IdString()
              ": failed to create output buffer, error response sent")
                 .c_str());
         continue;
@@ -1125,7 +1139,7 @@ TRITONBACKEND_ModelInstanceExecute(
                   "failed to get input buffer"));
           LOG_MESSAGE(
               TRITONSERVER_LOG_ERROR,
-              (std::string("request ") + std::to_string(r) +
+              (requests[r]->IdString()
                ": failed to get input buffer, error response sent")
                   .c_str());
           continue;
@@ -1149,7 +1163,7 @@ TRITONBACKEND_ModelInstanceExecute(
                   TRITONSERVER_ERROR_UNSUPPORTED, "failed to get copy buffer"));
           LOG_MESSAGE(
               TRITONSERVER_LOG_ERROR,
-              (std::string("request ") + std::to_string(r) +
+              (requests[r]->IdString()
                ": failed to get copy buffer, error response sent")
                   .c_str());
           continue;
