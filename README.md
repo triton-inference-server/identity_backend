@@ -75,7 +75,7 @@ the following additional cmake flags:
 
 When `TRITON_ENABLE_METRICS` is enabled, this backend implements an example
 of registering a custom metric to Triton's existing metrics endpoint via the
-[Metrics API](https://github.com/triton-inference-server/server/blob/main/docs/metrics.md#custom-metrics).
+[Metrics API](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/metrics.md#custom-metrics).
 
 This metric will track the cumulative `input_byte_size` of all requests
 to this backend per-model. Here's an example output of the custom metric
