@@ -526,8 +526,11 @@ TRITONBACKEND_Finalize(TRITONBACKEND_Backend* backend)
 {
   void* vstate;
   RETURN_IF_ERROR(TRITONBACKEND_BackendState(backend, &vstate));
-  IdentityBackendState* state = reinterpret_cast<IdentityBackendState*>(vstate);
+  RETURN_ERROR_IF_TRUE(
+      vstate == nullptr, TRITONSERVER_ERROR_INTERNAL,
+      std::string("unexpected nullptr state in TRITONBACKEND_Finalize"));
 
+  IdentityBackendState* state = reinterpret_cast<IdentityBackendState*>(vstate);
   LOG_MESSAGE(
       TRITONSERVER_LOG_INFO,
       (std::string("TRITONBACKEND_Finalize: state is '") + state->message_ +
@@ -535,7 +538,6 @@ TRITONBACKEND_Finalize(TRITONBACKEND_Backend* backend)
           .c_str());
 
   delete state;
-
   return nullptr;  // success
 }
 
@@ -580,6 +582,10 @@ TRITONBACKEND_ModelInitialize(TRITONBACKEND_Model* model)
 
   void* vbackendstate;
   RETURN_IF_ERROR(TRITONBACKEND_BackendState(backend, &vbackendstate));
+  RETURN_ERROR_IF_TRUE(
+      vbackendstate == nullptr, TRITONSERVER_ERROR_INTERNAL,
+      std::string("unexpected nullptr state in TRITONBACKEND_ModelInitialize"));
+
   IdentityBackendState* backend_state =
       reinterpret_cast<IdentityBackendState*>(vbackendstate);
 
@@ -620,13 +626,15 @@ TRITONBACKEND_ModelFinalize(TRITONBACKEND_Model* model)
 {
   void* vstate;
   RETURN_IF_ERROR(TRITONBACKEND_ModelState(model, &vstate));
-  ModelState* model_state = reinterpret_cast<ModelState*>(vstate);
+  RETURN_ERROR_IF_TRUE(
+      vstate == nullptr, TRITONSERVER_ERROR_INTERNAL,
+      std::string("unexpected nullptr state in TRITONBACKEND_ModelFinalize"));
 
+  ModelState* model_state = reinterpret_cast<ModelState*>(vstate);
   LOG_MESSAGE(
       TRITONSERVER_LOG_INFO, "TRITONBACKEND_ModelFinalize: delete model state");
 
   delete model_state;
-
   return nullptr;  // success
 }
 
@@ -665,6 +673,11 @@ TRITONBACKEND_ModelInstanceInitialize(TRITONBACKEND_ModelInstance* instance)
 
   void* vmodelstate;
   RETURN_IF_ERROR(TRITONBACKEND_ModelState(model, &vmodelstate));
+  RETURN_ERROR_IF_TRUE(
+      vmodelstate == nullptr, TRITONSERVER_ERROR_INTERNAL,
+      std::string(
+          "unexpected nullptr state in TRITONBACKEND_ModelInstanceInitialize"));
+
   ModelState* model_state = reinterpret_cast<ModelState*>(vmodelstate);
 
   // With each instance we create a ModelInstanceState object and
@@ -696,6 +709,11 @@ TRITONBACKEND_ModelInstanceFinalize(TRITONBACKEND_ModelInstance* instance)
 {
   void* vstate;
   RETURN_IF_ERROR(TRITONBACKEND_ModelInstanceState(instance, &vstate));
+  RETURN_ERROR_IF_TRUE(
+      vstate == nullptr, TRITONSERVER_ERROR_INTERNAL,
+      std::string(
+          "unexpected nullptr state in TRITONBACKEND_ModelInstanceFinalize"));
+
   ModelInstanceState* instance_state =
       reinterpret_cast<ModelInstanceState*>(vstate);
 
@@ -710,7 +728,6 @@ TRITONBACKEND_ModelInstanceFinalize(TRITONBACKEND_ModelInstance* instance)
       "TRITONBACKEND_ModelInstanceFinalize: delete instance state");
 
   delete instance_state;
-
   return nullptr;  // success
 }
 
@@ -730,6 +747,10 @@ TRITONBACKEND_ModelInstanceExecute(
   ModelInstanceState* instance_state;
   RETURN_IF_ERROR(TRITONBACKEND_ModelInstanceState(
       instance, reinterpret_cast<void**>(&instance_state)));
+  RETURN_ERROR_IF_TRUE(
+      instance_state == nullptr, TRITONSERVER_ERROR_INTERNAL,
+      std::string(
+          "unexpected nullptr state in TRITONBACKEND_ModelInstanceExecute"));
   ModelState* model_state = instance_state->StateForModel();
 
 #ifdef TRITON_ENABLE_GPU
