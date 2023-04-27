@@ -62,13 +62,13 @@ but the listed CMake argument can be used to override.
 If you are building on a release branch (or on a development branch
 that is based off of a release branch), then you must set these cmake
 arguments to point to that release branch as well. For example, if you
-are building the r21.10 identity_backend branch then you need to use
+are building the r23.04 identity_backend branch then you need to use
 the following additional cmake flags:
 
 ```
--DTRITON_BACKEND_REPO_TAG=r21.10
--DTRITON_CORE_REPO_TAG=r21.10
--DTRITON_COMMON_REPO_TAG=r21.10
+-DTRITON_BACKEND_REPO_TAG=r23.04
+-DTRITON_CORE_REPO_TAG=r23.04
+-DTRITON_COMMON_REPO_TAG=r23.04
 ```
 
 ## Custom Metric Example
