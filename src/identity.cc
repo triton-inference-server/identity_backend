@@ -25,6 +25,7 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <algorithm>
+#include <atomic>
 #include <map>
 #include <memory>
 #include <thread>
@@ -116,8 +117,8 @@ class ModelState : public BackendModel {
     return optional_inputs_;
   }
 
-  // Stores the instance count
-  size_t instance_count_;
+  // Stores the instance count. Atomic to protect reads/writes by all instances.
+  std::atomic<size_t> instance_count_;
 
   // Validate that model configuration is supported by this backend.
   TRITONSERVER_Error* ValidateModelConfig();
