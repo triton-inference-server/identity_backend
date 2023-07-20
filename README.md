@@ -1,5 +1,5 @@
 <!--
-# Copyright 2020-2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright 2020-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -79,7 +79,7 @@ of registering a custom metric to Triton's existing metrics endpoint via the
 
 This metric will track the cumulative `input_byte_size` of all requests
 to this backend per-model. Here's an example output of the custom metric
-from Triton's metrics endpoint after a few requests to each model: 
+from Triton's metrics endpoint after a few requests to each model:
 
 ```
 # HELP input_byte_size_counter Cumulative input byte size of all requests received by the model
