@@ -1260,7 +1260,7 @@ TRITONBACKEND_GetBackendAttribute(
   // This backend can safely handle parallel calls to
   // TRITONBACKEND_ModelInstanceInitialize (thread-safe).
   // TODO: Return to hard-coded. Using env var for testing.
-  bool supported = false;
+  bool supported = true;
   const char* env = getenv("IDENTITY_PARALLEL");
   if (env != nullptr) {
     supported = (std::string(env) == "1");
