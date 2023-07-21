@@ -420,9 +420,12 @@ ModelInstanceState::Create(
     ModelState* model_state, TRITONBACKEND_ModelInstance* triton_model_instance,
     ModelInstanceState** state)
 {
+  // Must be initialized and incremented before passing to constructor
+  // to guarantee unique_ids if parallel instance loading is supported.
+  const auto instance_id = model_state->instance_count_++;
   try {
-    *state = new ModelInstanceState(
-        model_state, triton_model_instance, model_state->instance_count_);
+    *state =
+        new ModelInstanceState(model_state, triton_model_instance, instance_id);
   }
   catch (const BackendModelInstanceException& ex) {
     RETURN_ERROR_IF_TRUE(
@@ -431,7 +434,6 @@ ModelInstanceState::Create(
     RETURN_IF_ERROR(ex.err_);
   }
 
-  model_state->instance_count_++;
   return nullptr;  // success
 }
 
@@ -1260,7 +1262,7 @@ TRITONBACKEND_GetBackendAttribute(
   // This backend can safely handle parallel calls to
   // TRITONBACKEND_ModelInstanceInitialize (thread-safe).
   // TODO: Return to hard-coded. Using env var for testing.
-  bool supported = false;
+  bool supported = true;
   const char* env = getenv("IDENTITY_PARALLEL");
   if (env != nullptr) {
     supported = (std::string(env) == "1");
