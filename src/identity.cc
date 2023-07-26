@@ -25,6 +25,7 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <algorithm>
+#include <atomic>
 #include <map>
 #include <memory>
 #include <thread>
@@ -116,8 +117,8 @@ class ModelState : public BackendModel {
     return optional_inputs_;
   }
 
-  // Stores the instance count
-  size_t instance_count_;
+  // Stores the instance count. Atomic to protect reads/writes by all instances.
+  std::atomic<size_t> instance_count_;
 
   // Validate that model configuration is supported by this backend.
   TRITONSERVER_Error* ValidateModelConfig();
@@ -419,9 +420,12 @@ ModelInstanceState::Create(
     ModelState* model_state, TRITONBACKEND_ModelInstance* triton_model_instance,
     ModelInstanceState** state)
 {
+  // Must be initialized and incremented before passing to constructor
+  // to guarantee unique_ids if parallel instance loading is supported.
+  const auto instance_id = model_state->instance_count_++;
   try {
-    *state = new ModelInstanceState(
-        model_state, triton_model_instance, model_state->instance_count_);
+    *state =
+        new ModelInstanceState(model_state, triton_model_instance, instance_id);
   }
   catch (const BackendModelInstanceException& ex) {
     RETURN_ERROR_IF_TRUE(
@@ -430,7 +434,6 @@ ModelInstanceState::Create(
     RETURN_IF_ERROR(ex.err_);
   }
 
-  model_state->instance_count_++;
   return nullptr;  // success
 }
 
@@ -1246,6 +1249,22 @@ TRITONBACKEND_ModelInstanceExecute(
       "failed reporting batch request statistics");
 
   return nullptr;  // success
+}
+
+TRITONSERVER_Error*
+TRITONBACKEND_GetBackendAttribute(
+    TRITONBACKEND_Backend* backend,
+    TRITONBACKEND_BackendAttribute* backend_attributes)
+{
+  LOG_MESSAGE(
+      TRITONSERVER_LOG_VERBOSE,
+      "TRITONBACKEND_GetBackendAttribute: setting attributes");
+  // This backend can safely handle parallel calls to
+  // TRITONBACKEND_ModelInstanceInitialize (thread-safe).
+  RETURN_IF_ERROR(TRITONBACKEND_BackendAttributeSetParallelModelInstanceLoading(
+      backend_attributes, true));
+
+  return nullptr;
 }
 
 }  // extern "C"
