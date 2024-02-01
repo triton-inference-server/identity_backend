@@ -1196,6 +1196,10 @@ TRITONBACKEND_ModelInstanceExecute(
     LOG_IF_ERROR(
         TRITONBACKEND_ResponseSetBoolParameter(responses[r], "param2", false),
         "failed setting boolean parameter");
+    LOG_IF_ERROR(
+        TRITONBACKEND_ResponseSetDoubleParameter(
+            responses[r], "param3", 123.123),
+        "failed setting double parameter");
   }
 
   uint64_t compute_end_ns = 0;
