@@ -905,8 +905,8 @@ TRITONBACKEND_ModelInstanceExecute(
         }
       }
 
-      for (uint32_t count = 0; count < nesting_count; count++){
-        std::string end_span_str = std::string("CUSTOM_ACTIVITY" + std::to_string(count) + "_END");
+      for (uint32_t count = 0; count < nesting_count ; count++){
+        std::string end_span_str = std::string("CUSTOM_ACTIVITY" + std::to_string(nesting_count - count - 1 ) + "_END");
         SET_TIMESTAMP(custom_activity_ns);
         GUARDED_RESPOND_IF_ERROR(
           responses, r, TRITONSERVER_InferenceTraceReportActivity(trace, custom_activity_ns, end_span_str.c_str()));
