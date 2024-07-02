@@ -858,7 +858,7 @@ TRITONBACKEND_ModelInstanceExecute(
   for (uint32_t r = 0; r < request_count; ++r) {
     TRITONBACKEND_Request* request = requests[r];
 
-    // 
+    // Example for tracing a custom activity from the backend
     TRITONSERVER_InferenceTrace* trace;
     GUARDED_RESPOND_IF_ERROR(
         responses, r, TRITONBACKEND_RequestTrace(request, &trace));
