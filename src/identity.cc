@@ -110,6 +110,10 @@ class ModelState : public BackendModel {
   // Get execution delay and delay multiplier
   uint64_t ExecDelay() const { return execute_delay_ms_; }
   uint64_t DelayMultiplier() const { return delay_multiplier_; }
+  
+  // Get the  amount of nested custom trace spans to test
+  uint64_t NestedSpanCount() const { return nested_span_count_; }
+  uint64_t SingleActivityFrequency() const { return single_activity_frequency_;}
 
   const std::map<int, std::tuple<TRITONSERVER_DataType, std::vector<int64_t>>>&
   OptionalInputs()
@@ -142,6 +146,10 @@ class ModelState : public BackendModel {
   // Delay time and multiplier to introduce into execution, in milliseconds.
   int execute_delay_ms_;
   int delay_multiplier_;
+
+  // Amount of nested custom trace spans to test.
+  int nested_span_count_{0};
+  int single_activity_frequency_{1};
 
   // Store index that the corresponding inputs can be optional. Also store
   // the output metadata to use, if an input is marked optional and not provided
@@ -378,6 +386,20 @@ ModelState::ValidateModelConfig()
         RETURN_IF_ERROR(delay_multiplier.MemberAsString(
             "string_value", &delay_multiplier_str));
         delay_multiplier_ = std::stoi(delay_multiplier_str);
+      }
+    }
+    if (params.Find("nested_span_count", &exec_delay)) {
+      std::string nested_span_count_str;
+      RETURN_IF_ERROR(
+          exec_delay.MemberAsString("string_value", &nested_span_count_str));
+      nested_span_count_ = std::stoi(nested_span_count_str);
+
+      common::TritonJson::Value single_activity_frequency;
+      if (params.Find("single_activity_frequency", &single_activity_frequency)) {
+        std::string single_activity_frequency_str;
+        RETURN_IF_ERROR(single_activity_frequency.MemberAsString(
+            "string_value", &single_activity_frequency_str));
+        single_activity_frequency_ = std::stoi(single_activity_frequency_str);
       }
     }
   }
@@ -835,6 +857,61 @@ TRITONBACKEND_ModelInstanceExecute(
   bool cuda_copy = false;
   for (uint32_t r = 0; r < request_count; ++r) {
     TRITONBACKEND_Request* request = requests[r];
+
+    // 
+    TRITONSERVER_InferenceTrace* trace;
+    GUARDED_RESPOND_IF_ERROR(
+        responses, r, TRITONBACKEND_RequestTrace(request, &trace));
+    
+    auto nesting_count = model_state ->NestedSpanCount();
+    auto singl_act_frequency = model_state ->SingleActivityFrequency();
+    
+    if (trace != nullptr){
+
+      uint64_t custom_activity_ns;
+      const char* activity_name = "CUSTOM_ACTIVITY_START";
+
+      SET_TIMESTAMP(custom_activity_ns);
+      GUARDED_RESPOND_IF_ERROR(
+        responses, r, TRITONSERVER_InferenceTraceReportActivity(trace, custom_activity_ns, activity_name));
+
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+      activity_name = "CUSTOM_ACTIVITY_END";
+      SET_TIMESTAMP(custom_activity_ns);
+      GUARDED_RESPOND_IF_ERROR(
+          responses, r, TRITONSERVER_InferenceTraceReportActivity(trace, custom_activity_ns, activity_name));
+
+
+
+      uint64_t custom_single_activity_ns;
+      const char* single_activity_name = "CUSTOM_SINGLE_ACTIVITY";
+      SET_TIMESTAMP(custom_single_activity_ns);
+      GUARDED_RESPOND_IF_ERROR(
+          responses, r, TRITONSERVER_InferenceTraceReportActivity(trace, custom_single_activity_ns, single_activity_name));
+
+
+      for (uint32_t count = 0; count < nesting_count; count++){
+        std::string start_span_str = std::string("CUSTOM_ACTIVITY" + std::to_string(count) + "_START");
+        SET_TIMESTAMP(custom_activity_ns);
+        GUARDED_RESPOND_IF_ERROR(
+          responses, r, TRITONSERVER_InferenceTraceReportActivity(trace, custom_activity_ns, start_span_str.c_str()));
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+        if (count % singl_act_frequency == 0){
+          SET_TIMESTAMP(custom_single_activity_ns);
+          GUARDED_RESPOND_IF_ERROR(
+              responses, r, TRITONSERVER_InferenceTraceReportActivity(trace, custom_single_activity_ns, single_activity_name));
+        }
+      }
+
+      for (uint32_t count = 0; count < nesting_count; count++){
+        std::string end_span_str = std::string("CUSTOM_ACTIVITY" + std::to_string(count) + "_END");
+        SET_TIMESTAMP(custom_activity_ns);
+        GUARDED_RESPOND_IF_ERROR(
+          responses, r, TRITONSERVER_InferenceTraceReportActivity(trace, custom_activity_ns, end_span_str.c_str()));
+      }
+    }
 
     const char* request_id = "";
     GUARDED_RESPOND_IF_ERROR(
