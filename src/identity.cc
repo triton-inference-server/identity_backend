@@ -1,4 +1,4 @@
-// Copyright 2020-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2020-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -1100,7 +1100,9 @@ TRITONBACKEND_ModelInstanceExecute(
 
           // Get the output buffer.
           void* output_buffer;
-          const auto byte_size = GetByteSize(dtype, shape);
+          int64_t byte_size = 0;
+          GUARDED_RESPOND_IF_ERROR(
+              responses, r, GetByteSize(dtype, shape, &byte_size));
           TRITONSERVER_MemoryType output_memory_type = TRITONSERVER_MEMORY_CPU;
           int64_t output_memory_type_id = 0;
           GUARDED_RESPOND_IF_ERROR(
