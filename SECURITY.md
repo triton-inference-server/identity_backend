@@ -88,8 +88,13 @@ corruption or crash the hosting server process.
   interface; the backend opens no sockets and parses no files.
 - Input and output buffers passed by the core, which can reside in CPU or GPU
   memory, copied by the `CopyBuffer` helper.
-- Backend configuration and model configuration supplied by the server, which
-  the backend only logs.
+- Backend configuration and model configuration supplied by the server. The
+  backend logs the backend configuration and also acts on model configuration:
+  optional-input shapes, a model-load delay (`creation_delay_sec`), an execution
+  delay (`execute_delay_ms`, `instance_wise_delay_multiplier`) and custom
+  tracing settings (`enable_custom_tracing`, `nested_span_count`,
+  `single_activity_frequency`). These parameters control runtime behavior, so
+  permission to change a model configuration is a runtime control.
 - Optional metrics registered through the Triton metrics API.
 
 ## Threat Model
@@ -121,10 +126,13 @@ corruption or crash the hosting server process.
 
 ## Critical Security Assumptions
 
-- **The Triton core validates requests.** The backend assumes the core has
-  authenticated the client, enforced size limits, and validated tensor shapes
-  and data types before the request reaches the backend. The backend itself
-  performs no authentication or authorization.
+- **Request protections are deployment requirements.** The backend performs no
+  authentication, authorization or request size check of its own, and it sizes
+  output buffers from the reported input byte size. It assumes the deployment
+  authenticates clients and enforces request size limits (through server
+  options or a gateway), and that the core has validated tensor shapes and data
+  types before the request reaches the backend. Where those controls are not
+  configured, requests reach the backend unauthenticated and unbounded.
 - **No transport security in this component.** The backend has no network
   surface; TLS and access control are the responsibility of the Triton server
   endpoints and the deployment around them.
