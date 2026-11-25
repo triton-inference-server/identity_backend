@@ -1,4 +1,4 @@
-// Copyright 2020-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2020-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -983,10 +983,18 @@ TRITONBACKEND_ModelInstanceExecute(
     // Collect all input indices
     std::set<int32_t> input_indices;
     for (uint32_t io_index = 0; io_index < input_count; io_index++) {
-      const char* input_name;
+      const char* input_name = nullptr;
       GUARDED_RESPOND_IF_ERROR(
           responses, r,
           TRITONBACKEND_RequestInputName(request, io_index, &input_name));
+      if (responses[r] == nullptr) {
+        LOG_MESSAGE(
+            TRITONSERVER_LOG_ERROR,
+            (std::string("request ") + std::to_string(r) +
+             ": failed to read input name, error response sent")
+                .c_str());
+        continue;
+      }
       input_indices.insert(std::stoi(std::string(input_name, 5, -1)));
     }
 
